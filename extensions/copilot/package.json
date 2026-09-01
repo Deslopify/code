@@ -2823,18 +2823,6 @@
         "enablement": "resourceScheme == 'ccreq'"
       },
       {
-        "command": "github.copilot.buildRemoteWorkspaceIndex",
-        "title": "%github.copilot.command.buildRemoteWorkspaceIndex%",
-        "category": "Chat",
-        "enablement": "github.copilot-chat.activated"
-      },
-      {
-        "command": "github.copilot.deleteExternalIngestWorkspaceIndex",
-        "title": "%github.copilot.command.deleteExternalIngestWorkspaceIndex%",
-        "category": "Developer",
-        "enablement": "github.copilot-chat.activated && !github.copilot.blackbirdExternalIndexingDisabled"
-      },
-      {
         "command": "github.copilot.report",
         "title": "Report Issue",
         "category": "Chat"
@@ -7060,8 +7048,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
-    "@github/blackbird-external-ingest-utils": "^0.3.0",
-    "@github/copilot": "^1.0.73",
+    "@github/copilot": "file:../../../copilot-types-1.0.73",
     "@google/genai": "1.30.0",
     "@humanwhocodes/gitignore-to-minimatch": "1.0.2",
     "@microsoft/tiktokenizer": "^1.0.10",
@@ -7083,7 +7070,7 @@
     "@opentelemetry/sdk-trace-node": "^2.5.1",
     "@opentelemetry/semantic-conventions": "^1.39.0",
     "@sinclair/typebox": "^0.34.41",
-    "@vscode/copilot-api": "^0.5.2",
+    "@vscode/copilot-api": "file:../../../copilot-api",
     "@vscode/extension-telemetry": "^1.5.1",
     "@vscode/l10n": "^0.0.18",
     "@vscode/prompt-tsx": "^0.4.0-alpha.8",

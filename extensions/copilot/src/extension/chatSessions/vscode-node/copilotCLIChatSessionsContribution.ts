@@ -55,7 +55,6 @@ import { buildMcpServerMappings } from '../copilotcli/node/mcpHandler';
 import { ICopilotCLISessionTracker } from '../copilotcli/vscode-node/copilotCLISessionTracker';
 import { ICopilotCLIChatSessionItemProvider } from './copilotCLIChatSessions';
 import { getCopilotCLIModelDetails, persistCopilotCLIResponseModelId } from './copilotCLIModelDetails';
-import { ICopilotCLITerminalIntegration, TerminalOpenLocation } from './copilotCLITerminalIntegration';
 import { CopilotCloudSessionsProvider } from './copilotCloudSessionsProvider';
 import { IPullRequestCreationService } from './pullRequestCreationService';
 import { getBlockingSiblingSessionsForFolder } from './worktreeSharing';
@@ -71,7 +70,6 @@ const ISOLATION_OPTION_ID = 'isolation';
 const PARENT_SESSION_OPTION_ID = 'parentSessionId';
 const LAST_USED_ISOLATION_OPTION_KEY = 'github.copilot.cli.lastUsedIsolationOption';
 const OPEN_REPOSITORY_COMMAND_ID = 'github.copilot.cli.sessions.openRepository';
-const OPEN_IN_COPILOT_CLI_COMMAND_ID = 'github.copilot.cli.openInCopilotCLI';
 const MAX_MRU_ENTRIES = 10;
 const CHECK_FOR_STEERING_DELAY = 100; // ms
 
@@ -192,19 +190,17 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 	constructor(
 		@ICopilotCLISessionService private readonly copilotcliSessionService: ICopilotCLISessionService,
 		@ICopilotCLISessionTracker private readonly sessionTracker: ICopilotCLISessionTracker,
-		@ICopilotCLITerminalIntegration private readonly terminalIntegration: ICopilotCLITerminalIntegration,
 		@IChatSessionMetadataStore private readonly chatSessionMetadataStore: IChatSessionMetadataStore,
 		@IChatSessionWorktreeService private readonly worktreeManager: IChatSessionWorktreeService,
 		@IRunCommandExecutionService private readonly commandExecutionService: IRunCommandExecutionService,
 		@IChatSessionWorkspaceFolderService private readonly workspaceFolderService: IChatSessionWorkspaceFolderService,
-		@IFolderRepositoryManager private readonly folderRepositoryManager: IFolderRepositoryManager,
 		@IGitService private readonly gitService: IGitService,
 		@IOctoKitService private readonly octoKitService: IOctoKitService,
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
-		this._register(this.terminalIntegration);
+
 		if (configurationService.getConfig(ConfigKey.Advanced.CLIChatLazyLoadSessionItem)) {
 			this.resolveChatSessionItem = async (item: vscode.ChatSessionItem, token: vscode.CancellationToken): Promise<vscode.ChatSessionItem | undefined> => {
 				const sessionId = SessionIdForCLI.parse(item.resource);
@@ -215,11 +211,6 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 				return this.toChatSessionItem(session, { includeChanges: true }, token);
 			};
 		}
-
-		// Resolve session dirs for terminal links. See resolveSessionDirsForTerminal.
-		this.terminalIntegration.setSessionDirResolver(terminal =>
-			resolveSessionDirsForTerminal(this.sessionTracker, terminal)
-		);
 
 		this._register(this.copilotcliSessionService.onDidChangeSessions(() => {
 			this.notifySessionsChange();
@@ -522,11 +513,6 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 			this.logService.trace(`[CopilotCLIChatSessionItemProvider] Failed to detect pull request on session open for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
-	public async createCopilotCLITerminal(location: TerminalOpenLocation = 'editor', name?: string, cwd?: string): Promise<void> {
-		// TODO@rebornix should be set by CLI
-		const terminalName = name || process.env.COPILOTCLI_TERMINAL_TITLE || l10n.t('Copilot CLI');
-		await this.terminalIntegration.openTerminal(terminalName, [], cwd, location);
-	}
 
 	public async resumeCopilotCLISessionInTerminal(sessionItem: vscode.ChatSessionItem): Promise<void> {
 		const id = SessionIdForCLI.parse(sessionItem.resource);
@@ -534,21 +520,6 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 		if (existingTerminal) {
 			existingTerminal.show();
 			return;
-		}
-
-		const terminalName = sessionItem.label || id;
-		const cliArgs = ['--resume', id];
-		const token = new vscode.CancellationTokenSource();
-		try {
-			const folderInfo = await this.folderRepositoryManager.getFolderRepository(id, undefined, token.token);
-			const cwd = folderInfo.worktree ?? folderInfo.repository ?? folderInfo.folder;
-			const terminal = await this.terminalIntegration.openTerminal(terminalName, cliArgs, cwd?.fsPath);
-			if (terminal) {
-				this.sessionTracker.setSessionTerminal(id, terminal);
-				this.terminalIntegration.setTerminalSessionDir(terminal, Uri.file(getCopilotCLISessionDir(id)));
-			}
-		} finally {
-			token.dispose();
 		}
 	}
 }
@@ -2318,16 +2289,6 @@ export function registerCLIChatCommands(
 			copilotcliSessionItemProvider.notifySessionsChange();
 		}
 	}));
-	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.newSession', async () => {
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('Copilot CLI'));
-	}));
-	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.newSessionToSide', async () => {
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editorBeside', l10n.t('Copilot CLI'));
-	}));
-	disposableStore.add(vscode.commands.registerCommand(OPEN_IN_COPILOT_CLI_COMMAND_ID, async (sourceControlContext?: unknown) => {
-		const rootUri = getSourceControlRootUri(sourceControlContext);
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('Copilot CLI'), rootUri?.fsPath);
-	}));
 	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.sessions.openWorktreeInNewWindow', async (sessionItem?: vscode.ChatSessionItem) => {
 		if (!sessionItem?.resource) {
 			return;
@@ -2376,44 +2337,6 @@ export function registerCLIChatCommands(
 		});
 
 		return folderUris && folderUris.length > 0 ? folderUris[0] : undefined;
-	}
-
-	function getSourceControlRootUri(sourceControlContext?: unknown): vscode.Uri | undefined {
-		if (!sourceControlContext) {
-			return undefined;
-		}
-
-		if (Array.isArray(sourceControlContext)) {
-			return getSourceControlRootUri(sourceControlContext[0]);
-		}
-
-		if (isUri(sourceControlContext)) {
-			return sourceControlContext;
-		}
-
-		if (typeof sourceControlContext !== 'object') {
-			return undefined;
-		}
-
-		const candidate = sourceControlContext as {
-			rootUri?: unknown;
-			sourceControl?: { rootUri?: unknown };
-			repository?: { rootUri?: unknown };
-		};
-
-		if (isUri(candidate.rootUri)) {
-			return candidate.rootUri;
-		}
-
-		if (isUri(candidate.sourceControl?.rootUri)) {
-			return candidate.sourceControl.rootUri;
-		}
-
-		if (isUri(candidate.repository?.rootUri)) {
-			return candidate.repository.rootUri;
-		}
-
-		return undefined;
 	}
 
 	disposableStore.add(vscode.commands.registerCommand(OPEN_REPOSITORY_COMMAND_ID, async (sessionItemResource?: vscode.Uri) => {
