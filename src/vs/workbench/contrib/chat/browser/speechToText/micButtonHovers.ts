@@ -8,7 +8,6 @@ import { escapeMarkdownSyntaxTokens, MarkdownString } from '../../../../../base/
 import { isWeb } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
 import { DICTATION_MODEL_SETTING, resolveDictationBackend } from './chatSpeechToTextService.js';
 
 /**
@@ -38,9 +37,6 @@ function getDictationDescription(configurationService: IConfigurationService, we
 	const policyModelId = configurationService.inspect<string>(DICTATION_MODEL_SETTING).policyValue?.trim();
 	if (resolveDictationBackend(modelId, policyModelId, web) === 'mai') {
 		return localize('dictation.hover.cloud', "Types what you say into the input. Transcribes in the cloud with the MAI speech model.");
-	}
-	if (!modelId || modelId === DEFAULT_LOCAL_TRANSCRIPTION_MODEL) {
-		return localize('dictation.hover.nemotronMultilingual', "Types what you say into the input. Transcribes on-device with the Nemotron 3.5 ASR multilingual model.");
 	}
 	return localize('dictation.hover.onDevice', "Types what you say into the input. Transcribes on-device with {0}.", modelId);
 }

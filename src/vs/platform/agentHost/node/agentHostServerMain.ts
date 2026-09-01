@@ -37,16 +37,13 @@ import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { IAgentHostCustomizationEnablementService } from './agentHostCustomizationEnablementService.js';
 import { IAgentHostStateManager } from './agentHostStateManager.js';
 import { BANG_COMMAND_PREFIX } from './agentHostBangCommand.js';
-import { CopilotAgent } from './copilot/copilotAgent.js';
-import { ClaudeAgent } from './claude/claudeAgent.js';
-import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
 import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostProviderService } from './agentHostProviderService.js';
 import { AgentHostCodexEnabledConfigKey, platformRootSchema } from '../common/agentHostSchema.js';
 import { AgentModelRefreshScheduler, MODEL_REFRESH_INTERVAL_MS } from './agentModelRefreshScheduler.js';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
+import { AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
 import { WebSocketProtocolServer } from './webSocketTransport.js';
 import { ProtocolServerHandler } from './protocolServerHandler.js';
 import { AgentHostClientFileSystemProvider } from '../common/agentHostClientFileSystemProvider.js';
@@ -231,8 +228,6 @@ async function main(): Promise<void> {
 	let sdkDownloadProgress: Event<IAgentSdkDownloadProgress> | undefined;
 	if (!options.quiet) {
 		sdkDownloadProgress = runtime.sdkDownloadProgress;
-		providerService.registerProvider(instantiationService.createInstance(CopilotAgent));
-		log('CopilotAgent registered');
 		// Claude and Codex providers are gated on two things:
 		//  1. The user-facing enable toggle (`chat.agentHost.<x>Agent.enabled`,
 		//     forwarded as an env var by the renderer-side starters; the remote
@@ -246,10 +241,12 @@ async function main(): Promise<void> {
 		//     devDependency, so `CodexAgent._resolveSdkRoot` resolves it from
 		//     `node_modules` in dev; built/shipped installs use the env-var
 		//     override or `product.agentSdks.codex`.
+		/*
 		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], true) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage))) {
 			providerService.registerProvider(instantiationService.createInstance(ClaudeAgent));
 			log('ClaudeAgent registered');
 		}
+		*/
 		if (!environmentService.isBuilt || agentSdkDownloader.isAvailable(CodexSdkPackage)) {
 			let codexRegistered = false;
 			const registerCodexIfEnabled = () => {
