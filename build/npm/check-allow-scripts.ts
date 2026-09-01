@@ -46,7 +46,8 @@ function checkDirectory(directory: string): CheckResult {
 	const result = spawnSync(npm, ['approve-scripts', '--allow-scripts-pending'], {
 		cwd: directory,
 		encoding: 'utf8',
-		env: { ...process.env, npm_config_loglevel: 'error' }
+		env: { ...process.env, npm_config_loglevel: 'error' },
+		shell: true
 	});
 	if (result.error) {
 		throw new Error(`Failed to run npm approve-scripts in ${path.relative(root, directory) || '.'}: ${result.error.message}`);
