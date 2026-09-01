@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import ingestUtils = require('@github/blackbird-external-ingest-utils');
 import * as l10n from '@vscode/l10n';
 import crypto from 'crypto';
 import { CancellationToken } from 'vscode-languageserver-protocol';
@@ -21,6 +20,7 @@ import { EmbeddingType } from '../../../embeddings/common/embeddingsComputer';
 import { githubHeaders, IGithubApiFetcherService } from '../../../github/common/githubApiFetcherService';
 import { ILogService } from '../../../log/common/logService';
 import { ITelemetryService } from '../../../telemetry/common/telemetry';
+import { ingestUtils } from './external_ingest_utils';
 
 
 export interface ExternalIngestFile {
