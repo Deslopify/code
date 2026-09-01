@@ -923,19 +923,14 @@
                 },
                 "enumDescriptions": [
                     {
-                        "key": "dictation.model.nemotronMultilingual.policy",
-                        "value": "Use the on-device transcription model. Audio does not leave the device."
-                    },
-                    {
                         "key": "dictation.model.mai.policy",
                         "value": "Use the cloud transcription service. Audio is streamed to the service."
                     }
                 ]
             },
             "type": "string",
-            "default": "nemotron-3.5-asr-streaming-0.6b",
+            "default": "mai",
             "enum": [
-                "nemotron-3.5-asr-streaming-0.6b",
                 "mai"
             ],
             "included": true,
