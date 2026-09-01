@@ -18,6 +18,7 @@
 	border: 1px solid var(--vscode-chat-requestBorder);
 	border-radius: var(--vscode-cornerRadius-medium);
 	transition: opacity 0.1s ease-in-out;
+	z-index: 1;
 }
 
 .chat-getting-started-tip-container .chat-tip-widget:hover .chat-tip-toolbar,
