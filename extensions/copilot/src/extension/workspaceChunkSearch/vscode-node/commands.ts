@@ -42,26 +42,6 @@ export function register(accessor: ServicesAccessor): IDisposable {
 		});
 	})));
 
-	disposableStore.add(vscode.commands.registerCommand(enableExternalIngestCommandId, onlyRunOneAtATime(async () => {
-		const enabled = await workspaceChunkSearch.enableExternalIngest();
-		if (enabled) {
-			vscode.window.showInformationMessage(t`External ingest enabled for this workspace.`);
-			return;
-		}
-
-		vscode.window.showWarningMessage(t`External ingest is disabled by your organization's policy.`);
-	})));
-
-	disposableStore.add(vscode.commands.registerCommand(deleteExternalIngestWorkspaceIndexCommandId, onlyRunOneAtATime(async () => {
-		await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Window,
-			title: t`Deleting external ingest index...`,
-		}, async () => {
-			await workspaceChunkSearch.deleteExternalIngestWorkspaceIndex();
-			vscode.window.showInformationMessage(t`External ingest index deleted.`);
-		});
-	})));
-
 	disposableStore.add(vscode.commands.registerCommand('github.copilot.debug.collectWorkspaceIndexDiagnostics', async () => {
 		const document = await vscode.workspace.openTextDocument({ language: 'markdown', content: 'Collecting codebase index diagnostics...\n' });
 		const editor = await vscode.window.showTextDocument(document);
