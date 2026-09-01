@@ -31,8 +31,6 @@ import { AgentHostGitService } from './agentHostGitService.js';
 import { AgentPluginManager } from './agentPluginManager.js';
 import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js';
 import { IByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
-import { ClaudeAgentSdkService, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
-import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { ByokLmProxyService, IByokLmProxyService, NullByokLmProxyService } from './copilot/byokLmProxyService.js';
 import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService.js';
 import { NodeWorkerDiffComputeService } from './diffComputeService.js';
@@ -142,8 +140,6 @@ export function registerAgentHostHostServices(services: ServiceCollection, input
 	services.set(IAgentHostGitService, new SyncDescriptor(AgentHostGitService));
 	services.set(IAgentPluginManager, new SyncDescriptor(AgentPluginManager, [inputs.userDataPath]));
 	services.set(IAgentSdkDownloader, new SyncDescriptor(AgentSdkDownloader));
-	services.set(IClaudeAgentSdkService, new SyncDescriptor(ClaudeAgentSdkService));
-	services.set(IClaudeProxyService, new SyncDescriptor(ClaudeProxyService));
 	services.set(ICodexProxyService, new SyncDescriptor(CodexProxyService, [undefined]));
 	services.set(IAgentHostOTelService, new SyncDescriptor(AgentHostOTelService, [{ fetchFn: inputs.fetchFn }]));
 	services.set(IAgentHostUtilityModelService, new SyncDescriptor(AgentHostUtilityModelService, [inputs.byok.kind === 'renderer']));

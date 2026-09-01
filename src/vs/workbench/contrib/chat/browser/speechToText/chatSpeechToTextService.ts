@@ -3,40 +3,34 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { computeLevenshteinDistance } from '../../../../../base/common/diff/diff.js';
-import { joinPath } from '../../../../../base/common/resources.js';
 import { isWeb } from '../../../../../base/common/platform.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { IAction, toAction } from '../../../../../base/common/actions.js';
+import { IAction } from '../../../../../base/common/actions.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
-import { IProgress, IProgressService, IProgressStep, Progress, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
-import { NotificationTelemetryId } from '../../../../../platform/notification/common/notificationTelemetry.js';
-import { DeferredPromise, raceCancellation, raceTimeout } from '../../../../../base/common/async.js';
+import { IProgress, IProgressStep } from '../../../../../platform/progress/common/progress.js';
+import { DeferredPromise, raceCancellation } from '../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { localize } from '../../../../../nls.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
-import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelStatus, ILocalTranscriptionService, LocalTranscriptionModelState } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { ILocalTranscriptionService } from '../../../../../platform/localTranscription/common/localTranscription.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IAuthenticationService } from '../../../../services/authentication/common/authentication.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
-import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 import { AgentsVoiceStorageKeys } from '../../../agentsVoice/common/agentsVoice.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { ChatMessageRole, ILanguageModelsService } from '../../common/languageModels.js';
 import { IPromptsService } from '../../common/promptSyntax/service/promptsService.js';
 import { createPcmCaptureNode } from '../pcmCaptureWorklet.js';
 import { getMediaCaptureWindow } from '../voiceClient/micCaptureService.js';
-import { resolveDictationLanguage } from './dictationLanguage.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IVoiceCodeTranscription, IVoiceCodeTranscriptionClient } from './voiceCodeTranscriptionClient.js';
 import { getTranscriptionWebSocketUrl } from '../voiceClient/voiceEndpoint.js';
@@ -153,7 +147,7 @@ type DictationCleanupModel = 'none' | 'copilot-utility-small' | 'gpt-5.6-luna';
  * - `nemo`: an on-device model via {@link ILocalTranscriptionService} (Foundry Local).
  * - `mai`: the cloud transcription service.
  */
-type DictationBackend = 'nemo' | 'mai';
+type DictationBackend = 'mai';
 
 type BackendFinalizationResult = {
 	readonly text: string | undefined;
@@ -164,15 +158,16 @@ export function isDictationEntitled(entitlement: ChatEntitlement, isInternal: bo
 	return !usesMai || entitlement !== ChatEntitlement.Enterprise || isInternal;
 }
 
-export function resolveDictationBackend(configuredModel: string | undefined, policyModel: string | undefined, web: boolean): DictationBackend {
+export function resolveDictationBackend(_configuredModel: string | undefined, _policyModel: string | undefined, _web: boolean): DictationBackend {
+	/*
 	const model = policyModel ?? configuredModel;
 	return (web && policyModel === undefined) || model === DICTATION_MAI_MODEL_ID ? 'mai' : 'nemo';
+	*/
+	return 'mai';
 }
 
 /** How long to wait after `ptt_end` for the backend's final transcript before returning what we have. */
 const MAI_FINAL_TIMEOUT_MS = 35_000;
-/** How long to wait for the on-device backend to finish before returning its streamed transcript. */
-const NEMO_FINAL_TIMEOUT_MS = 8000;
 
 type SpeechToTextSessionEvent = {
 	outcome: 'completed' | 'cancelled' | 'error';
@@ -205,21 +200,6 @@ type SpeechToTextSessionClassification = {
 	errorName: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; comment: 'Error type reported by the platform when the session failed, else empty.' };
 	closeCode: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; isMeasurement: true; comment: 'Voice websocket close code when a cloud dictation session failed, else 0.' };
 	cleanupModel: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The language model used to attempt dictation cleanup, or none when no model request was made.' };
-};
-
-type SpeechToTextModelPrepareEvent = {
-	outcome: 'ready' | 'error';
-	downloaded: boolean;
-	durationMs: number;
-	errorCode: string;
-};
-type SpeechToTextModelPrepareClassification = {
-	owner: 'meganrogge';
-	comment: 'Tracks download/load success and duration of the on-device dictation (speech-to-text) model.';
-	outcome: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; comment: 'Whether the model became ready or failed to prepare.' };
-	downloaded: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; isMeasurement: true; comment: 'Whether a download to disk was observed (first use) versus loading an already-cached model.' };
-	durationMs: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; isMeasurement: true; comment: 'Time in milliseconds from starting preparation until the model became ready or errored.' };
-	errorCode: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; comment: 'Short error identifier when preparation failed, else empty.' };
 };
 
 type SpeechToTextAccuracyEvent = {
@@ -435,9 +415,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	 */
 	private _downloadNotification: { readonly report: IProgress<IProgressStep>; readonly complete: () => void; lastReported: number } | undefined;
 
-	/** Most recent model status, used to re-sync the notification on screen-reader changes. */
-	private _lastModelStatus: ILocalTranscriptionModelStatus | undefined;
-
 	private _state = ChatSpeechToTextState.Idle;
 	get state(): ChatSpeechToTextState {
 		return this._state;
@@ -470,14 +447,13 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	private _sessionGeneration = 0;
 	private _pendingStart: Promise<void> | undefined;
 	private _pendingStop: Promise<void> | undefined;
-	private _pendingLocalTeardown: Promise<void> | undefined;
 	/** Drains the capture worklet's trailing buffer; see {@link IPcmCaptureNode.flush}. */
 	private _flushCapture: (() => Promise<void>) | undefined;
 
 	private readonly _localSessionDisposables = this._register(new DisposableStore());
 
 	/** Backend selected for the in-progress session; set at `start`. */
-	private _activeBackend: DictationBackend = 'nemo';
+	private _activeBackend: DictationBackend = 'mai';
 
 	// --- MAI cloud transcription session state. ---
 	/** Disposables for the active MAI session (transcription listener, etc.). */
@@ -499,10 +475,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		if (backend === 'mai') {
 			return !!this._transcriptionWsUrl() && this._hasGitHubSession;
 		}
-		// On-device transcription needs no configuration — the model downloads
-		// on first use. It is only unavailable where the platform lacks native
-		// inference support (e.g. web).
-		return this._localTranscription.isSupported;
+		return false;
 	}
 
 	get showTranscriptWhileDictating(): boolean {
@@ -539,27 +512,17 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	/** Cancellation for the in-flight experimental LLM cleanup request, aborted when the session is cancelled or disposed. */
 	private readonly _cleanupCts = this._register(new MutableDisposable<CancellationTokenSource>());
 
-	// Model-preparation telemetry accumulator. `_prepareStartMs` is non-zero
-	// while a preparation is being tracked, so the terminal Ready/Error status
-	// can report the elapsed download/load time exactly once.
-	private _prepareStartMs = 0;
-
 	constructor(
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@INotificationService private readonly _notificationService: INotificationService,
-		@IProgressService private readonly _progressService: IProgressService,
 		@ILogService private readonly _logService: ILogService,
-		@ICommandService private readonly _commandService: ICommandService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IStorageService private readonly _storageService: IStorageService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
-		@IEnvironmentService private readonly _environmentService: IEnvironmentService,
-		@ILocalTranscriptionService private readonly _localTranscription: ILocalTranscriptionService,
 		@IVoiceCodeTranscriptionClient private readonly _transcriptionClient: IVoiceCodeTranscriptionClient,
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@IProductService private readonly _productService: IProductService,
 		@IAccessibilitySignalService private readonly _accessibilitySignalService: IAccessibilitySignalService,
-		@IAccessibilityService private readonly _accessibilityService: IAccessibilityService,
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 		@IPromptsService private readonly _promptsService: IPromptsService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
@@ -746,26 +709,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._sessionStartMs = 0;
 	}
 
-	/**
-	 * Emit the model-preparation telemetry event once, when the on-device model
-	 * reaches a terminal state (ready or error). `_prepareStartMs` guards against
-	 * duplicate emission, since `_handleModelStatus` can fire repeatedly.
-	 */
-	private _logModelPrepareTelemetry(status: ILocalTranscriptionModelStatus): void {
-		if (this._prepareStartMs === 0) {
-			return;
-		}
-		const outcome = status.state === LocalTranscriptionModelState.Ready ? 'ready' : 'error';
-		const durationMs = Date.now() - this._prepareStartMs;
-		this._telemetryService.publicLog2<SpeechToTextModelPrepareEvent, SpeechToTextModelPrepareClassification>('chatSpeechToText.modelPrepare', {
-			outcome,
-			downloaded: status.downloaded === true,
-			durationMs,
-			errorCode: outcome === 'error' ? (status.errorCode || 'unknown') : '',
-		});
-		this._prepareStartMs = 0;
-	}
-
 	private _setState(state: ChatSpeechToTextState): void {
 		if (this._state === state) {
 			return;
@@ -810,13 +753,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			return;
 		}
 
-		if (backend === 'nemo' && !this._localTranscription.isSupported) {
-			this._notificationService.notify({
-				severity: Severity.Warning,
-				message: localize('chatStt.notSupported', "On-device speech-to-text is not available on this platform."),
-			});
-			return;
-		}
 		if (backend === 'mai' && !this._transcriptionWsUrl()) {
 			this._notificationService.notify({
 				severity: Severity.Warning,
@@ -837,12 +773,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	}
 
 	private async _startEntitled(window: Window & typeof globalThis, surface: ChatDictationSurface, backend: DictationBackend, generation: number, startGeneration: number): Promise<void> {
-		if (backend === 'nemo') {
-			await this._pendingLocalTeardown;
-			if (!this._isCurrentStart(generation, startGeneration, backend)) {
-				return;
-			}
-		}
 		const captureWindow = getMediaCaptureWindow(window);
 		this._sessionStartMs = Date.now();
 		this._sessionSegments = 0;
@@ -943,7 +873,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		if (this._activeBackend === 'mai') {
 			return this._startMaiSession(window, generation);
 		}
-		return this._startLocalSession(window, generation);
+		return;
 	}
 
 	/**
@@ -1044,210 +974,9 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		}
 	}
 
-	/**
-	 * Begin an on-device transcription session in the utility process and pipe
-	 * its interim/final results onto the shared cumulative-transcript surface.
-	 */
-	private async _startLocalSession(window: Window & typeof globalThis, generation: number): Promise<void> {
-		const local = this._localTranscription;
-		this._localSessionDisposables.add(local.onDidTranscribe(result => {
-			// The local service returns the full cumulative transcript each time.
-			this._emitTranscript(result.text, result.finalizedText ?? '', result.isFinal);
-		}));
-		const cacheDir = joinPath(this._environmentService.cacheHome, 'chatDictationModels').fsPath;
-		const model = this._getModelId();
-		const language = resolveDictationLanguage(
-			this._configurationService.getValue('agents.voice.language'),
-			window.navigator.language,
-		);
-		await local.start({ cacheDir, model, language });
-		if (generation !== this._sessionGeneration) {
-			return;
-		}
-
-		// The model loads in the utility process in the background (start()
-		// returns immediately). On first use it may download hundreds of MB, so
-		// surface progress until it is ready; recording proceeds meanwhile and
-		// interim transcripts begin once the model finishes loading.
-		const status = await local.getModelStatus();
-		if (generation !== this._sessionGeneration) {
-			return;
-		}
-		if (status.state === LocalTranscriptionModelState.Error) {
-			this._handleModelStatus(status);
-		} else if (status.state !== LocalTranscriptionModelState.Ready) {
-			this._trackModelPreparation();
-		}
-	}
-
-	private _getModelId(): string | undefined {
-		const value = this._configurationService.getValue<string>(DICTATION_MODEL_SETTING);
-		return value ? value.trim() || undefined : undefined;
-	}
-
-	/**
-	 * Track model download/load so the toolbar mic can show a spinner until the
-	 * model is ready. While the model is downloading to disk (which can be
-	 * hundreds of MB on first use) a progress notification is also shown so the
-	 * user understands why dictation has not started yet; it dismisses once the
-	 * download finishes. Recording proceeds meanwhile and interim transcripts
-	 * begin once the model finishes loading.
-	 */
-	private _trackModelPreparation(): void {
-		this._setPreparingModel(true);
-		// Start timing preparation (download + load) for the model-prepare
-		// telemetry event, emitted once the model reaches Ready or Error.
-		this._prepareStartMs = Date.now();
-		// Guarantee the download notification is dismissed no matter how the
-		// session ends (teardown, cancel, or the service being disposed).
-		this._localSessionDisposables.add(toDisposable(() => {
-			this._lastModelStatus = undefined;
-			this._completeDownloadNotification();
-		}));
-		// The accessible progress notification is only shown to screen-reader
-		// users, so re-sync it whenever screen-reader optimization is toggled
-		// mid-preparation (a change on its own emits no model status).
-		this._localSessionDisposables.add(this._accessibilityService.onDidChangeScreenReaderOptimized(() => {
-			if (this._lastModelStatus) {
-				this._updateDownloadNotification(this._lastModelStatus);
-			}
-		}));
-		// Register the status listener BEFORE snapshotting the current status. A
-		// Downloading→Ready/Error transition can land between the snapshot and the
-		// subscription; if it did, the completion event would be missed and the
-		// spinner and download notification would be stranded for the rest of the
-		// recording. Registering first, then re-querying, makes the handoff
-		// race-free — any transition is caught by the listener, and the snapshot
-		// settles the current state.
-		this._localSessionDisposables.add(this._localTranscription.onDidChangeModelStatus(status => this._handleModelStatus(status)));
-		this._localTranscription.getModelStatus().then(status => this._handleModelStatus(status), () => { /* errors also surface via onDidChangeModelStatus */ });
-	}
-
-	/**
-	 * Drive the progress ring, download notification, and error handling from a
-	 * model status. Safe to call repeatedly and from both the status snapshot and
-	 * the change listener, since the progress and preparing-state updates are
-	 * idempotent.
-	 */
-	private _handleModelStatus(status: ILocalTranscriptionModelStatus): void {
-		this._lastModelStatus = status;
-		// Track whether we are in an actual on-disk download (a confirmed cache
-		// miss) versus merely loading an already-cached model, so the UI can show
-		// a download affordance only during a real download.
-		this._setDownloadingModel(status.state === LocalTranscriptionModelState.Downloading);
-		this._updateModelDownloadProgress(status);
-		this._updateDownloadNotification(status);
-		if (status.state === LocalTranscriptionModelState.Ready) {
-			this._logModelPrepareTelemetry(status);
-			const wasPreparing = this._isPreparingModel;
-			this._setPreparingModel(false);
-			// The recording-started cue was deferred while the model prepared;
-			// now that we are actually listening, play it (if still recording).
-			if (wasPreparing && this._state === ChatSpeechToTextState.Recording) {
-				this._accessibilitySignalService.playSignal(AccessibilitySignal.voiceRecordingStarted);
-			}
-		} else if (status.state === LocalTranscriptionModelState.Error) {
-			this._logModelPrepareTelemetry(status);
-			this._setPreparingModel(false);
-			this._failModelSession(status);
-		}
-	}
-
-	/**
-	 * Feed the toolbar progress ring: expose the download fraction while it is
-	 * known, and `undefined` (indeterminate ring) before the first byte total
-	 * arrives or once the download completes and the model is loading.
-	 */
-	private _updateModelDownloadProgress(status: ILocalTranscriptionModelStatus): void {
-		if (status.state === LocalTranscriptionModelState.Downloading && typeof status.progress === 'number') {
-			this._setModelDownloadProgress(Math.max(0, Math.min(1, status.progress)));
-		} else {
-			this._setModelDownloadProgress(undefined);
-		}
-	}
-
-	/**
-	 * Surface model-preparation progress to screen-reader users via a progress
-	 * notification that stays visible across the download and load phases.
-	 */
-	private _updateDownloadNotification(status: ILocalTranscriptionModelStatus): void {
-		const preparing = status.state === LocalTranscriptionModelState.Downloading
-			|| status.state === LocalTranscriptionModelState.Loading;
-		// Only screen-reader users get this notification (sighted users get the
-		// toolbar download ring and its rich hover, which assistive technology
-		// cannot reach). Dismiss it once preparation ends or if a screen reader
-		// is no longer active.
-		if (!preparing || !this._accessibilityService.isScreenReaderOptimized()) {
-			this._completeDownloadNotification();
-			return;
-		}
-		if (!this._downloadNotification) {
-			const deferred = new DeferredPromise<void>();
-			let report: IProgress<IProgressStep> = Progress.None;
-			this._progressService.withProgress({
-				location: ProgressLocation.Notification,
-				telemetry: NotificationTelemetryId.DictationModelPrepare,
-				title: localize('chatStt.preparingModel', "Preparing speech-to-text model…"),
-				delay: 500,
-			}, progress => {
-				report = progress;
-				return deferred.p;
-			});
-			this._downloadNotification = { report, complete: () => deferred.complete(), lastReported: 0 };
-		}
-		if (status.state === LocalTranscriptionModelState.Loading) {
-			// Download finished; the bar no longer moves, so make the wait
-			// self-explanatory rather than a seemingly stuck full bar.
-			this._downloadNotification.report.report({ message: localize('chatStt.loadingModel', "Loading model…") });
-			return;
-		}
-		if (typeof status.progress === 'number') {
-			const percent = Math.max(0, Math.min(100, Math.round(status.progress * 100)));
-			const increment = percent - this._downloadNotification.lastReported;
-			const message = localize('chatStt.downloadingPercent', "Downloading… {0}%", percent);
-			if (increment > 0) {
-				this._downloadNotification.report.report({ increment, total: 100, message });
-				this._downloadNotification.lastReported = percent;
-			} else {
-				// Keep the message fresh (e.g. while still at 0%) so the bar is
-				// never blank and unlabeled during the initial download stall.
-				this._downloadNotification.report.report({ message });
-			}
-		} else {
-			// Byte total not known yet (e.g. still contacting the model host):
-			// show an indeterminate "Downloading…" rather than a blank bar.
-			this._downloadNotification.report.report({ message: localize('chatStt.downloading', "Downloading…") });
-		}
-	}
-
 	private _completeDownloadNotification(): void {
 		this._downloadNotification?.complete();
 		this._downloadNotification = undefined;
-	}
-
-	/**
-	 * Handle a terminal model-preparation error. A download failure caused by a
-	 * blocked/unreachable model registry (common on locked-down corporate
-	 * networks) is recoverable by importing the model from a locally supplied
-	 * package, so in that case the error surfaces an action that launches the
-	 * offline install flow. Other failures show a plain error.
-	 */
-	private _failModelSession(status: ILocalTranscriptionModelStatus): void {
-		const canImport = this._localTranscription.isSupported
-			&& (status.errorCode === 'network' || status.errorCode === 'notFound');
-		if (!canImport) {
-			this._failSession('model', localize('chatStt.modelError', "On-device speech-to-text model failed to load: {0}", status.error ?? ''));
-			return;
-		}
-		// Name the specific model so users know exactly which package to obtain
-		// on a machine that can reach the download, then sideload via the command.
-		const message = localize('chatStt.modelErrorOffline', "Could not download the {0} speech-to-text model, which can happen on networks that block the model registry. You can install it from a downloaded package instead.", DEFAULT_LOCAL_TRANSCRIPTION_MODEL);
-		const importAction = toAction({
-			id: INSTALL_DICTATION_MODEL_COMMAND_ID,
-			label: localize('chatStt.installFromPackage', "Install from Local Package..."),
-			run: () => this._commandService.executeCommand(INSTALL_DICTATION_MODEL_COMMAND_ID),
-		});
-		this._failSession('model', message, importAction);
 	}
 
 	/**
@@ -1329,9 +1058,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 					finalization.text,
 					this._activeBackend !== 'mai' && options?.preserveLiveTranscript === true,
 				);
-			if (this._activeBackend === 'nemo' && finalization.timedOut && !stripDictationFillers(text)) {
-				this._sessionErrorCode = this._sessionErrorCode || 'transcribe.timeout';
-			}
 		} catch (err) {
 			if (generation !== this._sessionGeneration) {
 				return undefined;
@@ -1551,23 +1277,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			}
 			return { text: this._transcript, timedOut: !receivedFinal };
 		}
-		const stop = this._localTranscription.stop();
-		const finalText = await raceTimeout(stop, NEMO_FINAL_TIMEOUT_MS);
-		if (finalText !== undefined) {
-			return { text: finalText, timedOut: false };
-		}
-		this._logService.warn(`[chat-stt] on-device final transcription timed out after ${NEMO_FINAL_TIMEOUT_MS}ms; using streamed transcript`);
-		const cancel = this._localTranscription.cancel();
-		const teardown = Promise.all([
-			stop.catch(error => this._logService.warn('[chat-stt] on-device final transcription failed after timing out', error)),
-			cancel.catch(error => this._logService.warn('[chat-stt] failed to cancel on-device transcription after finalization timeout', error)),
-		]).then(() => undefined);
-		this._pendingLocalTeardown = teardown;
-		void teardown.then(() => {
-			if (this._pendingLocalTeardown === teardown) {
-				this._pendingLocalTeardown = undefined;
-			}
-		});
 		return { text: this._transcript, timedOut: true };
 	}
 
@@ -1595,7 +1304,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			this._transcriptionClient.disconnect();
 			return;
 		}
-		this._localTranscription.cancel();
 	}
 
 	private async _startCapture(window: Window & typeof globalThis, stream: MediaStream): Promise<void> {
@@ -1649,7 +1357,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			}
 			return;
 		}
-		this._localTranscription.pushAudio(buffer).catch(err => this._onAudioPushError(err));
 	}
 
 	private _stopCapture(): void {
@@ -1721,9 +1428,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._stopCapture();
 		this._setPreparingModel(false);
 		this._completeDownloadNotification();
-		// Drop any in-progress preparation timing; a session torn down before the
-		// model reached a terminal state does not emit a model-prepare event.
-		this._prepareStartMs = 0;
 		this._localSessionDisposables.clear();
 		// Release the cloud transcription session and its listeners.
 		this._maiSessionDisposables.clear();
