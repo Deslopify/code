@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import ingestUtils = require('@github/blackbird-external-ingest-utils');
 import * as l10n from '@vscode/l10n';
 import * as fs from 'node:fs';
 import sql from 'node:sqlite';
@@ -41,6 +40,7 @@ import { shouldPotentiallyIndexFile } from '../workspaceFileIndex';
 import { CodeSearchRepoStatus, TriggerIndexingError, TriggerRemoteIndexingError } from './codeSearchRepo';
 import { computeCheckpointHash, ExternalIngestFile, ExternalIngestFileSet, ExternalIngestRequestError, IExternalIngestClient } from './externalIngestClient';
 import { WorkspaceFolderIdMap } from './workspaceFolderIdMap';
+import { ingestUtils } from './external_ingest_utils';
 
 const debug = false;
 

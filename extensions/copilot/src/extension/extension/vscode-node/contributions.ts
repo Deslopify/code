@@ -9,7 +9,6 @@ import { BYOKContrib } from '../../byok/vscode-node/byokContribution';
 import { ChatDebugFileLoggerContribution } from '../../chat/vscode-node/chatDebugFileLoggerService';
 import { ChatQuotaContribution } from '../../chat/vscode-node/chatQuota.contribution';
 import { ChatSessionContextContribution } from '../../chatSessionContext/vscode-node/chatSessionContextProvider';
-import { ChatSessionsContrib } from '../../chatSessions/vscode-node/chatSessions';
 import { SessionStoreTracker } from '../../chronicle/vscode-node/sessionStoreTracker';
 import * as sessionSyncContribution from '../../chronicle/vscode-node/sessionSync.contribution';
 import * as chatBlockLanguageContribution from '../../codeBlocks/vscode-node/chatBlockLanguageFeatures.contribution';
@@ -55,7 +54,6 @@ import { ToolsContribution } from '../../tools/vscode-node/tools';
 import { OTelChatDebugLogProviderContribution } from '../../trajectory/vscode-node/otelChatDebugLogProvider';
 import { InlineCompletionContribution } from '../../typescriptContext/vscode-node/languageContextService';
 import { NesRenameContribution } from '../../typescriptContext/vscode-node/nesRenameService';
-import * as workspaceIndexingContribution from '../../workspaceChunkSearch/vscode-node/workspaceChunkSearch.contribution';
 import { WorkspaceRecorderFeature } from '../../workspaceRecorder/vscode-node/workspaceRecorderFeature';
 import vscodeContributions from '../vscode/contributions';
 
@@ -99,8 +97,6 @@ export const vscodeNodeContributions: IExtensionContributionFactory[] = [
 	asContributionFactory(DiagnosticsContextContribution),
 	asContributionFactory(ChatSessionContextContribution),
 	asContributionFactory(CompletionsUnificationContribution),
-	workspaceIndexingContribution,
-	asContributionFactory(ChatSessionsContrib),
 	asContributionFactory(GitHubMcpContrib),
 	asContributionFactory(OTelContrib),
 	asContributionFactory(SessionStoreTracker),
@@ -113,7 +109,7 @@ export const vscodeNodeContributions: IExtensionContributionFactory[] = [
  * when the user is logged in and chat is enabled.
  * Anything that contributes a copilot chat feature that doesn't need
  * to run when chat is not enabled should be added here.
-*/
+ */
 export const vscodeNodeChatContributions: IExtensionContributionFactory[] = [
 	asContributionFactory(ConfigurationMigrationContribution),
 	asContributionFactory(RequestLogTree),
