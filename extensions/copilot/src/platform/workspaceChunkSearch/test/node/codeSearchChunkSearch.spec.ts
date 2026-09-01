@@ -101,7 +101,6 @@ describe('CodeSearchChunkSearch authentication identity', () => {
 			authentication,
 			new class extends mock<ICodeSearchAuthenticationService>() { }(),
 			config,
-			instantiation,
 			new NullExperimentationService(),
 			new class extends mock<IGitService>() { }(),
 			log,
