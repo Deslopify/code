@@ -45,12 +45,14 @@ allowBuilds:
   '@parcel/watcher@2.5.6': true
   '@playwright/browser-chromium@1.61.1': true
   '@vscode/deviceid@0.1.5': true
+  '@vscode/deviceid@file:../vscode-deviceid': true
   '@vscode/fs-copyfile@2.0.0': true
   '@vscode/native-watchdog@1.4.6': true
   '@vscode/policy-watcher@1.7.0': true
   '@vscode/ripgrep@1.17.1': true
   '@vscode/spdlog@0.15.8': true
   '@vscode/sqlite3@5.1.12-vscode': true
+  '@vscode/sqlite3@file:../vscode-node-sqlite3': true
   '@vscode/windows-ca-certs@0.3.4': true
   '@vscode/windows-mutex@0.5.3': true
   '@vscode/windows-process-tree@0.8.0': true
@@ -79,5 +81,3 @@ overrides:
   koffi: 3.2.1
   serialize-javascript: ^7.0.3
   yauzl: ^3.3.1
-patchedDependencies:
-  foundry-local-sdk: build/npm/patches/foundry-local-sdk.patch

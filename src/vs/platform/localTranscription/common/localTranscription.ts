@@ -13,7 +13,7 @@ export const ILocalTranscriptionService = createDecorator<ILocalTranscriptionSer
 export const localTranscriptionChannelName = 'localTranscription';
 
 /** Default on-device model used for dictation. */
-export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL = 'nemotron-3.5-asr-streaming-0.6b';
+export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL = 'mai';
 
 export interface ILocalTranscriptionModelImportResult {
 	readonly model: string;

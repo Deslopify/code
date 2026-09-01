@@ -28,10 +28,12 @@ function postBuild(outDir: string) {
 	}
 }
 
-run({
-	entryPoints: [
-		path.join(srcDir, 'katex.ts'),
-	],
-	srcDir,
-	outdir: outDir,
-}, process.argv, postBuild);
+run(
+	{
+		entryPoints: [path.join(srcDir, 'katex.ts')],
+		srcDir,
+		outdir: outDir,
+	},
+	process.argv,
+	postBuild,
+);

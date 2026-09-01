@@ -51,37 +51,32 @@ export function createAsar(folderPath: string, unpackGlobs: string[], skipGlobs:
 	// Do not insert twice the same directory
 	const seenDir: { [key: string]: boolean } = {};
 	const insertDirectoryRecursive = (dir: string) => {
-		if (seenDir[dir]) {
+		const normalizedDir = dir.replace(/\\/g, '/');
+		if (seenDir[normalizedDir]) {
 			return;
 		}
 
-		let lastSlash = dir.lastIndexOf('/');
-		if (lastSlash === -1) {
-			lastSlash = dir.lastIndexOf('\\');
-		}
+		const lastSlash = normalizedDir.lastIndexOf('/');
 		if (lastSlash !== -1) {
-			insertDirectoryRecursive(dir.substring(0, lastSlash));
+			insertDirectoryRecursive(normalizedDir.substring(0, lastSlash));
 		}
-		seenDir[dir] = true;
-		filesystem.insertDirectory(dir);
+		seenDir[normalizedDir] = true;
+		filesystem.insertDirectory(normalizedDir);
 	};
 
 	const insertDirectoryForFile = (file: string) => {
-		let lastSlash = file.lastIndexOf('/');
-		if (lastSlash === -1) {
-			lastSlash = file.lastIndexOf('\\');
-		}
+		const normalizedFile = file.replace(/\\/g, '/');
+		const lastSlash = normalizedFile.lastIndexOf('/');
 		if (lastSlash !== -1) {
-			insertDirectoryRecursive(file.substring(0, lastSlash));
+			insertDirectoryRecursive(normalizedFile.substring(0, lastSlash));
 		}
 	};
 
 	const insertFile = (relativePath: string, stat: { size: number; mode: number }, shouldUnpack: boolean) => {
-		insertDirectoryForFile(relativePath);
+		const normalizedPath = relativePath.replace(/\\/g, '/');
+		insertDirectoryForFile(normalizedPath);
 		pendingInserts++;
-		// Do not pass `onFileInserted` directly because it gets overwritten below.
-		// Create a closure capturing `onFileInserted`.
-		filesystem.insertFile(relativePath, shouldUnpack, { stat: stat }, {}).then(() => onFileInserted(), () => onFileInserted());
+		filesystem.insertFile(normalizedPath, shouldUnpack, { stat: stat }, {}).then(() => onFileInserted(), () => onFileInserted());
 	};
 
 	return es.through(function (file) {
