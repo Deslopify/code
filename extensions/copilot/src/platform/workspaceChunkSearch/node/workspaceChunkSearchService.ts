@@ -27,14 +27,13 @@ import { IIgnoreService } from '../../ignore/common/ignoreService.js';
 import { logExecTime, LogExecTime } from '../../log/common/logExecTime';
 import { ILogService } from '../../log/common/logService';
 import { IChatEndpoint } from '../../networking/common/networking';
-import { INotificationService } from '../../notification/common/notificationService';
 import { ISimulationTestContext } from '../../simulationTestContext/common/simulationTestContext';
 import { ITelemetryService } from '../../telemetry/common/telemetry';
 import { getWorkspaceFileDisplayPath, IWorkspaceService } from '../../workspace/common/workspaceService';
 import { IGithubAvailableEmbeddingTypesService } from '../common/githubAvailableEmbeddingTypes';
 import { IRerankerService } from '../common/rerankerService';
 import { StrategySearchResult, StrategySearchSizing, WorkspaceChunkQuery, WorkspaceChunkQueryWithEmbeddings, WorkspaceChunkSearchOptions, WorkspaceSearchAlert } from '../common/workspaceChunkSearch';
-import { CodeSearchChunkSearch, CodeSearchRemoteIndexState, ExternalIngestEnablement } from './codeSearch/codeSearchChunkSearch';
+import { CodeSearchChunkSearch, CodeSearchRemoteIndexState } from './codeSearch/codeSearchChunkSearch';
 import { BuildIndexTriggerReason, TriggerIndexingError } from './codeSearch/codeSearchRepo';
 import { IWorkspaceFileIndex } from './workspaceFileIndex';
 
@@ -67,8 +66,6 @@ export interface IWorkspaceChunkSearchService extends IDisposable {
 
 	readonly onDidChangeIndexState: Event<void>;
 
-	getIndexState(): Promise<WorkspaceIndexState>;
-
 	isAvailable(): Promise<boolean>;
 
 	searchFileChunks(
@@ -81,10 +78,6 @@ export interface IWorkspaceChunkSearchService extends IDisposable {
 	): Promise<WorkspaceChunkSearchResult>;
 
 	triggerIndexing(trigger: BuildIndexTriggerReason, onProgress: (message: string) => void, telemetryInfo: TelemetryCorrelationId, token: CancellationToken): Promise<Result<true, TriggerIndexingError>>;
-
-	enableExternalIngest(): Promise<boolean>;
-
-	deleteExternalIngestWorkspaceIndex(): Promise<void>;
 
 	getDiagnosticsDump(): AsyncIterable<string>;
 }
@@ -172,20 +165,6 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 		}
 	}
 
-	async getIndexState(): Promise<WorkspaceIndexState> {
-		const impl = await this.tryInit(true);
-		if (!impl) {
-			return {
-				remoteIndexState: {
-					status: 'disabled',
-					repos: [],
-				},
-			};
-		}
-
-		return impl.getIndexState();
-	}
-
 	async isAvailable(): Promise<boolean> {
 		if (!this._impl) {
 			return false;
@@ -210,23 +189,6 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 		return impl.triggerIndexing(trigger, onProgress, telemetryInfo, token);
 	}
 
-	async enableExternalIngest(): Promise<boolean> {
-		const impl = await this.tryInit(false);
-		if (!impl) {
-			return false;
-		}
-
-		return impl.enableExternalIngest();
-	}
-
-	async deleteExternalIngestWorkspaceIndex(): Promise<void> {
-		const impl = await this.tryInit(false);
-		if (!impl) {
-			throw new Error('Workspace chunk search service not available');
-		}
-		return impl.deleteExternalIngestWorkspaceIndex();
-	}
-
 	async *getDiagnosticsDump(): AsyncIterable<string> {
 		const impl = await this.tryInit(true);
 		if (!impl) {
@@ -242,7 +204,6 @@ class WorkspaceChunkSearchServiceImpl extends Disposable implements IWorkspaceCh
 	declare readonly _serviceBrand: undefined;
 
 	private readonly shouldEagerlyIndexKey = 'workspaceChunkSearch.shouldEagerlyIndex';
-	private readonly hasPromptedForExternalIngestKey = 'workspaceChunkSearch.externalIngest.prompted';
 
 	private readonly _codeSearchChunkSearch: CodeSearchChunkSearch;
 
@@ -255,7 +216,6 @@ class WorkspaceChunkSearchServiceImpl extends Disposable implements IWorkspaceCh
 		@IEmbeddingsComputer private readonly _embeddingsComputer: IEmbeddingsComputer,
 		@IIgnoreService private readonly _ignoreService: IIgnoreService,
 		@ILogService private readonly _logService: ILogService,
-		@INotificationService private readonly _notificationService: INotificationService,
 		@IRerankerService private readonly _rerankerService: IRerankerService,
 		@ISimulationTestContext private readonly _simulationTestContext: ISimulationTestContext,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
@@ -286,33 +246,12 @@ class WorkspaceChunkSearchServiceImpl extends Disposable implements IWorkspaceCh
 		});
 	}
 
-	async getIndexState(): Promise<WorkspaceIndexState> {
-		return {
-			remoteIndexState: this._codeSearchChunkSearch.getRemoteIndexState(this.hasPromptedForExternalIngest),
-		};
-	}
-
 	async isAvailable(): Promise<boolean> {
 		return this._codeSearchChunkSearch.isAvailable(new TelemetryCorrelationId('WorkspaceChunkSearchServiceImpl.isAvailable'), false, CancellationToken.None);
 	}
 
 	triggerIndexing(trigger: BuildIndexTriggerReason, onProgress: (message: string) => void, telemetryInfo: TelemetryCorrelationId, token: CancellationToken): Promise<Result<true, TriggerIndexingError>> {
 		return this._codeSearchChunkSearch.triggerIndexing(trigger, onProgress, telemetryInfo, token);
-	}
-
-	async enableExternalIngest(): Promise<boolean> {
-		if (!this._codeSearchChunkSearch.canExternalIngestBeEnabled()) {
-			return false;
-		}
-
-		await this.setHasPromptedForExternalIngest();
-		return this._codeSearchChunkSearch.enableExternalIngest();
-	}
-
-	deleteExternalIngestWorkspaceIndex(): Promise<void> {
-		return this._codeSearchChunkSearch.deleteExternalIngestWorkspaceIndex(
-			new TelemetryCorrelationId('WorkspaceChunkSearchService::deleteExternalIngestWorkspaceIndex'),
-			CancellationToken.None);
 	}
 
 	getDiagnosticsDump(): AsyncIterable<string> {
@@ -329,7 +268,6 @@ class WorkspaceChunkSearchServiceImpl extends Disposable implements IWorkspaceCh
 	): Promise<WorkspaceChunkSearchResult> {
 		const wasFirstSearchInWorkspace = !this._extensionContext.workspaceState.get(this.shouldEagerlyIndexKey, false);
 		this._extensionContext.workspaceState.update(this.shouldEagerlyIndexKey, true);
-		await raceCancellationError(this.promptForExternalIngestIfNeeded(token), token);
 
 		return logExecTime(this._logService, 'WorkspaceChunkSearch.searchFileChunks', async (): Promise<WorkspaceChunkSearchResult> => {
 			// Kick off (but do not wait on) query embedding resolve as soon as possible because almost all strategies will ultimately need it
@@ -439,32 +377,6 @@ class WorkspaceChunkSearchServiceImpl extends Disposable implements IWorkspaceCh
 				execTime
 			});
 		});
-	}
-
-	private get hasPromptedForExternalIngest(): boolean {
-		return this._extensionContext.workspaceState.get(this.hasPromptedForExternalIngestKey, false);
-	}
-
-	private async setHasPromptedForExternalIngest(): Promise<void> {
-		await this._extensionContext.workspaceState.update(this.hasPromptedForExternalIngestKey, true);
-		this._onDidChangeIndexState.fire();
-	}
-
-	private async promptForExternalIngestIfNeeded(token: CancellationToken): Promise<void> {
-		if (token.isCancellationRequested || this.hasPromptedForExternalIngest || this._codeSearchChunkSearch.getExternalIngestEnablement() !== ExternalIngestEnablement.DisabledBySetting) {
-			return;
-		}
-
-		await this.setHasPromptedForExternalIngest();
-		const enable = l10n.t('Enable');
-		const result = await this._notificationService.showInformationMessage(
-			l10n.t('Enable external ingest for semantic codebase search in this workspace? External ingest availability is controlled by your Copilot policy and can be disabled in workspace settings.'),
-			enable
-		);
-
-		if (result === enable && !token.isCancellationRequested) {
-			await this._codeSearchChunkSearch.enableExternalIngest();
-		}
 	}
 
 	private toQueryWithEmbeddings(query: WorkspaceChunkQuery, token: CancellationToken): WorkspaceChunkQueryWithEmbeddings {
