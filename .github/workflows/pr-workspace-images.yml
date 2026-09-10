@@ -55,7 +55,7 @@ concurrency:
 jobs:
   linux:
     name: Linux
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       NPM_ARCH: x64
@@ -218,7 +218,7 @@ jobs:
   linux-packages:
     name: Linux (apt packages)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout microsoft/vscode
@@ -238,7 +238,7 @@ jobs:
   # there).
   # macOS:
   #   name: macOS
-  #   runs-on: vscode-large-runners-macos-5-core-0
+  #   runs-on: macos-latest
   #   timeout-minutes: 60
   #   env:
   #     NPM_ARCH: arm64
@@ -318,7 +318,7 @@ jobs:
 
   windows:
     name: Windows
-    runs-on: vscode-large-runners-windows-8-core
+    runs-on: windows-latest
     timeout-minutes: 90
     env:
       NPM_ARCH: x64
@@ -422,7 +422,7 @@ jobs:
   wsl-distro:
     name: Windows (WSL distro)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: [ self-hosted, 1ES.Pool=1es-vscode-oss-windows-2022-x64, "JobId=wsl-distro-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}" ]
+    runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Checkout microsoft/vscode

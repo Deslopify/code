@@ -17,7 +17,7 @@ concurrency:
 jobs:
   scan:
     name: Scan CSS cascade-order dependencies
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     # The scan stops localizing after its own time budget (below) and still
     # writes a report; this is the hard stop if anything hangs.
     timeout-minutes: 180

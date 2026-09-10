@@ -52,7 +52,7 @@ jobs:
     name: Compile
     needs: caches
     if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.compile == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout microsoft/vscode
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -126,7 +126,7 @@ jobs:
     name: Linux
     needs: caches
     if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.linux == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       NPM_ARCH: x64
       VSCODE_ARCH: x64
@@ -237,7 +237,7 @@ jobs:
   #   name: macOS
   #   needs: caches
   #   if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.macOS == 'true') }}
-  #   runs-on: vscode-large-runners-macos-5-core-0
+  #   runs-on: macos-latest
   #   env:
   #     NPM_ARCH: arm64
   #     VSCODE_ARCH: arm64
@@ -325,7 +325,7 @@ jobs:
     name: Windows
     needs: caches
     if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.windows == 'true') }}
-    runs-on: vscode-large-runners-windows-8-core
+    runs-on: windows-latest
     env:
       NPM_ARCH: x64
       VSCODE_ARCH: x64
@@ -455,7 +455,7 @@ jobs:
     name: Copilot (Linux)
     needs: caches
     if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.copilot-linux == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout microsoft/vscode
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -495,7 +495,7 @@ jobs:
     name: Copilot (Windows)
     needs: caches
     if: ${{ !cancelled() && (needs.caches.result != 'success' || needs.caches.outputs.copilot-windows == 'true') }}
-    runs-on: vscode-large-runners-windows-8-core
+    runs-on: windows-latest
     steps:
       - name: Checkout microsoft/vscode
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -72,7 +72,7 @@ jobs:
   electron-unit-electron:
     name: Electron-Unit (electron)
     if: ${{ inputs.electron_unit_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-unit-electron
       ELECTRON_TESTS: 'true'
@@ -633,7 +633,7 @@ jobs:
   electron-unit-node:
     name: Electron-Unit (node)
     if: ${{ inputs.electron_unit_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-unit-node
       ELECTRON_TESTS: 'true'
@@ -648,7 +648,7 @@ jobs:
   electron-node:
     name: Electron (node.js)
     if: ${{ inputs.node_integration_tests }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-node
       ELECTRON_TESTS: 'true'
@@ -660,7 +660,7 @@ jobs:
   electron-extension-host:
     name: Electron (extension host)
     if: ${{ inputs.electron_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-extension-host
       ELECTRON_TESTS: 'true'
@@ -673,7 +673,7 @@ jobs:
   agent-host-e2e:
     name: Agent-Host-E2E
     if: ${{ inputs.agent_host_e2e_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-agent-host-e2e
       ELECTRON_TESTS: 'true'
@@ -687,7 +687,7 @@ jobs:
   electron-smoke-1:
     name: Electron-Smoke (shard 1/3)
     if: ${{ inputs.electron_smoke_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-smoke-shard1
       ELECTRON_TESTS: 'true'
@@ -699,7 +699,7 @@ jobs:
   electron-smoke-2:
     name: Electron-Smoke (shard 2/3)
     if: ${{ inputs.electron_smoke_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-smoke-shard2
       ELECTRON_TESTS: 'true'
@@ -711,7 +711,7 @@ jobs:
   electron-smoke-3:
     name: Electron-Smoke (shard 3/3)
     if: ${{ inputs.electron_smoke_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: electron-smoke-shard3
       ELECTRON_TESTS: 'true'
@@ -723,7 +723,7 @@ jobs:
   browser-unit:
     name: Browser-Unit
     if: ${{ inputs.browser_unit_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: browser-unit
       BROWSER_TESTS: 'true'
@@ -734,7 +734,7 @@ jobs:
   browser:
     name: Browser
     if: ${{ inputs.browser_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: browser
       BROWSER_TESTS: 'true'
@@ -747,7 +747,7 @@ jobs:
   remote-integration:
     name: Remote (integration)
     if: ${{ inputs.remote_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: remote
       REMOTE_TESTS: 'true'
@@ -757,7 +757,7 @@ jobs:
   remote-smoke:
     name: Remote (smoke)
     if: ${{ inputs.remote_affected }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     env:
       ARTIFACT_NAME: remote-smoke
       REMOTE_TESTS: 'true'

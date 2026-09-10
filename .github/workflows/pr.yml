@@ -34,7 +34,7 @@ jobs:
   # job: the Ripple job reports a broken ripple.
   changes:
     name: Detect Changes
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     outputs:
       cli: ${{ steps.detect.outputs.cli }}
       copilot-shim: ${{ steps.detect.outputs.copilot-shim }}
@@ -209,7 +209,7 @@ jobs:
     name: Compile & Hygiene
     needs: changes
     if: ${{ !cancelled() }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     outputs:
       checks-failed: ${{ steps.failed-checks.outputs.failed }}
     env:
@@ -335,7 +335,7 @@ jobs:
     name: Monaco Editor
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.monaco-editor == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions: {}
     env:
@@ -424,7 +424,7 @@ jobs:
     name: Telemetry
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.telemetry == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Checkout microsoft/vscode
@@ -460,7 +460,7 @@ jobs:
     name: Ripple
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.ripple-changed == 'true' }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     steps:
       - name: Check that ripple builds, passes its tests and plans the tests
         env:
@@ -574,7 +574,7 @@ jobs:
     name: Copilot - Check Test Cache
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
@@ -625,7 +625,7 @@ jobs:
     name: Copilot - Check Telemetry
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -649,7 +649,7 @@ jobs:
     name: Copilot - Test (Linux)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -757,7 +757,7 @@ jobs:
     name: Copilot - Test (Windows)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-    runs-on: vscode-large-runners-windows-8-core
+    runs-on: windows-latest
     permissions:
       contents: read
     steps:
@@ -836,7 +836,7 @@ jobs:
     name: chat-lib - Test (Linux)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -852,7 +852,7 @@ jobs:
   #   name: chat-lib - Test (macOS)
   #   needs: changes
   #   if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.copilot == 'true') }}
-  #   runs-on: vscode-large-runners-macos-5-core-0
+  #   runs-on: macos-latest
   #   timeout-minutes: 30
   #   permissions:
   #     contents: read
@@ -888,7 +888,7 @@ jobs:
     name: Cancel Run
     needs: compile
     if: ${{ failure() && needs.compile.outputs.checks-failed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     permissions:
       actions: write
     steps:
@@ -930,7 +930,7 @@ jobs:
       - chat-lib-windows-tests
       - cancel-run
     if: ${{ always() }}
-    runs-on: vscode-large-runners-ubuntu-8-core
+    runs-on: ubuntu-latest
     steps:
       - name: Check job results
         env:
