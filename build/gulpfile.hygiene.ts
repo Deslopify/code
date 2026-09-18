@@ -7,13 +7,14 @@ import es from 'event-stream';
 import minimist from 'minimist';
 import path from 'path';
 import fs from 'fs';
+import url from 'url';
 import vfs from 'vinyl-fs';
 import * as task from './lib/gulp/task.ts';
 import { all } from './filters.ts';
 import { checkCopilotEnginesVersion, checkNoNewJavaScriptFiles, hygiene } from './hygiene.ts';
 import { getChangedFilesScope, getHygieneScope } from './lib/changedFiles.ts';
 
-const dirName = path.dirname(new URL(import.meta.url).pathname);
+const dirName = path.dirname(url.fileURLToPath(import.meta.url));
 
 /**
  * Checks that the dependencies of `actualPath` that the root package.json also declares have the
