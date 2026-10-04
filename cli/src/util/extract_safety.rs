@@ -32,8 +32,12 @@ fn lexically_normalize(path: &Path) -> Option<PathBuf> {
 /// Ensures the extraction root exists and returns its canonicalized form to
 /// use as the reference for containment checks.
 pub fn prepare_extraction_root(root: &Path) -> Result<PathBuf, WrappedError> {
-	fs::create_dir_all(root)
-		.map_err(|e| wrap(e, format!("could not create extraction root {}", root.display())))?;
+	fs::create_dir_all(root).map_err(|e| {
+		wrap(
+			e,
+			format!("could not create extraction root {}", root.display()),
+		)
+	})?;
 	fs::canonicalize(root).map_err(|e| {
 		wrap(
 			e,

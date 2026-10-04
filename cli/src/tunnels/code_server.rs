@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-use super::paths::{InstalledServer, ServerPaths};
+use super::paths::{InstalledServer, ServerPaths, OVERRIDE_SERVER_PATH};
 use crate::async_pipe::get_socket_name;
 use crate::constants::{
 	APPLICATION_NAME, EDITOR_WEB_URL, QUALITYLESS_PRODUCT_NAME, QUALITYLESS_SERVER_NAME,
@@ -26,6 +26,7 @@ use crate::util::machine::process_exists;
 use crate::util::prereqs::skip_requirements_check;
 use regex::Regex;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -83,6 +84,11 @@ pub struct CodeServerArgs {
 	pub agent_host_bridge_host: Option<String>,
 	pub agent_host_bridge_port: Option<u16>,
 	pub agent_host_bridge_connection_token: Option<String>,
+	// server acquisition: a VS Code server build on this machine to run
+	// directly instead of downloading a server release. Deliberately not
+	// part of `command_arguments()` -- the server is given this, not told
+	// about it.
+	pub local_server: Option<PathBuf>,
 }
 
 impl CodeServerArgs {
@@ -212,14 +218,35 @@ impl ResolvedServerParams {
 			headless: self.release.target == TargetKind::Server,
 		}
 	}
+
+	/// The local server build to run, if the user picked one instead of a
+	/// server release.
+	pub fn local_server(&self) -> Option<&Path> {
+		self.code_server_args.local_server.as_deref()
+	}
 }
 
 impl ServerParamsRaw {
 	pub async fn resolve(
-		self,
+		mut self,
 		log: &log::Logger,
 		http: BoxedHttp,
 	) -> Result<ResolvedServerParams, AnyError> {
+		// A local build is its own source of truth: it decides the commit we
+		// report and cache state under, so resolve it before anything else and
+		// let the commit short-circuit the update service below.
+		if let Some(p) = self.code_server_args.local_server.clone() {
+			let commit = resolve_local_server_commit(log, &p).await?;
+			info!(
+				log,
+				"Running local {} build at {} (commit {})",
+				QUALITYLESS_SERVER_NAME,
+				p.display(),
+				commit
+			);
+			self.commit_id = Some(commit);
+		}
+
 		Ok(ResolvedServerParams {
 			release: self.get_or_fetch_commit_id(log, http).await?,
 			code_server_args: self.code_server_args,
@@ -250,6 +277,97 @@ impl ServerParamsRaw {
 			.get_latest_commit(self.platform, target, self.quality)
 			.await
 	}
+}
+
+/// Resolves which server executable to run outside of a download. The
+/// `--server-path` flag (or `VSCODE_CLI_SERVER_PATH`) wins; the compile-time
+/// OSS development override is the fallback so existing dev builds keep
+/// working. `None` means "download a server release as usual".
+pub fn resolve_local_server(explicit: Option<&str>) -> Option<PathBuf> {
+	explicit
+		.map(PathBuf::from)
+		.or_else(|| OVERRIDE_SERVER_PATH.map(PathBuf::from))
+}
+
+/// Resolves the identity a local server build is tracked under. The commit is
+/// the one the build reports from `--version`, so the editor, the log and pid
+/// files, and the "is it already running" check all agree on which build this
+/// is. It's prefixed so a local build never shares state -- or a `prune` /
+/// `evict` target -- with a downloaded release of the same commit.
+async fn resolve_local_server_commit(log: &log::Logger, path: &Path) -> Result<String, AnyError> {
+	if !path.is_file() {
+		return Err(CodeError::LocalServerNotFound(path.display().to_string()).into());
+	}
+
+	match probe_local_server_commit(path).await {
+		Some(commit) => Ok(format!("local-{commit}")),
+		None => {
+			warning!(
+				log,
+				"Could not read a commit from {} --version; identifying it by path instead",
+				path.display()
+			);
+			Ok(local_server_id(path))
+		}
+	}
+}
+
+/// Reads the commit a server build reports from `--version`. Returns `None` if
+/// the build can't be run or doesn't report a usable commit, in which case the
+/// caller falls back to identifying the build by path.
+async fn probe_local_server_commit(path: &Path) -> Option<String> {
+	// Deliberately built the same way as the server itself is launched, so a
+	// path pointing at a script (`scripts/code-server.bat`) is probed
+	// exactly the way it will later be run.
+	let output = new_script_command(path)
+		.arg("--version")
+		.stdin(std::process::Stdio::null())
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::piped())
+		.output()
+		.await
+		.ok()?;
+
+	if !output.status.success() {
+		return None;
+	}
+
+	parse_version_commit(&String::from_utf8_lossy(&output.stdout)).map(str::to_string)
+}
+
+/// Extracts the commit from `--version` output. The message is three lines,
+/// version / commit / architecture (see `buildVersionMessage` in
+/// `src/vs/platform/environment/node/argv.ts`), but the launcher's own noise
+/// can precede it -- the OSS dev script prints `Starting server: ...` and
+/// prelaunch chatter first. The architecture is the one line of the three with
+/// a fixed, tiny value set, so it anchors the message and the commit is
+/// whichever line precedes it.
+fn parse_version_commit(stdout: &str) -> Option<&str> {
+	let lines: Vec<&str> = stdout.lines().map(str::trim).collect();
+	let arch = lines.iter().position(|line| is_known_arch(line))?;
+	let commit = lines.get(arch.checked_sub(1)?)?;
+
+	// Guards against placeholders like "Unknown commit", and against a
+	// separator that would break the `<quality>-<commit>` cache folder name.
+	(!commit.is_empty() && commit.chars().all(is_commit_id_char)).then_some(*commit)
+}
+
+fn is_known_arch(line: &str) -> bool {
+	matches!(line, "x64" | "arm64" | "arm" | "ia32")
+}
+
+fn is_commit_id_char(c: char) -> bool {
+	c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')
+}
+
+/// A stable identifier for a local build. Derived from the path so the same
+/// build keeps the same log, pid file, and running server check across
+/// invocations. Used when the build doesn't report a commit of its own, and
+/// by callers that only need to name the build in a log.
+pub fn local_server_id(path: &Path) -> String {
+	let mut hash = Sha256::new();
+	hash.update(path.to_string_lossy().as_bytes());
+	format!("local-{:x}", hash.finalize())[..18].to_string()
 }
 
 #[derive(Deserialize)]
@@ -386,13 +504,22 @@ impl<'a> ServerBuilder<'a> {
 		launcher_paths: &'a LauncherPaths,
 		http: BoxedHttp,
 	) -> Self {
+		let mut server_paths = server_params
+			.as_installed_server()
+			.server_paths(launcher_paths);
+
+		// A local build keeps the cache-derived folder for its log and pid
+		// file, but runs the binary the user pointed us at instead of one
+		// from a downloaded release.
+		if let Some(p) = server_params.local_server() {
+			server_paths.executable = p.to_path_buf();
+		}
+
 		Self {
 			logger,
 			server_params,
 			launcher_paths,
-			server_paths: server_params
-				.as_installed_server()
-				.server_paths(launcher_paths),
+			server_paths,
 			http,
 		}
 	}
@@ -444,8 +571,13 @@ impl<'a> ServerBuilder<'a> {
 		}
 	}
 
-	/// Removes a cached server.
+	/// Removes a cached server. Local builds are not in the download cache and
+	/// are never the user's to delete, so this does nothing for them.
 	pub async fn evict(&self) -> Result<(), WrappedError> {
+		if self.server_params.local_server().is_some() {
+			return Ok(());
+		}
+
 		let name = get_server_folder_name(
 			self.server_params.release.quality,
 			&self.server_params.release.commit,
@@ -456,6 +588,29 @@ impl<'a> ServerBuilder<'a> {
 
 	/// Ensures the server is set up in the configured directory.
 	pub async fn setup(&self) -> Result<(), AnyError> {
+		if let Some(p) = self.server_params.local_server() {
+			// The build is already on this machine, so there is nothing to
+			// download and unpack -- but the log and pid files still live in
+			// the cache-derived folder, so that directory has to exist.
+			debug!(
+				self.logger,
+				"Using local {} build at {}, nothing to download",
+				QUALITYLESS_SERVER_NAME,
+				p.display()
+			);
+			return fs::create_dir_all(&self.server_paths.server_dir)
+				.map_err(|e| {
+					wrap(
+						e,
+						format!(
+							"error creating directory {}",
+							self.server_paths.server_dir.display()
+						),
+					)
+				})
+				.map_err(AnyError::from);
+		}
+
 		debug!(
 			self.logger,
 			"Installing and setting up {}...", QUALITYLESS_SERVER_NAME
@@ -977,6 +1132,32 @@ async fn get_should_use_breakaway_from_job() -> bool {
 mod tests {
 	use super::*;
 
+	/// An HTTP client that fails every request. Used to assert that a code
+	/// path resolves entirely locally and never reaches the update service.
+	struct FailingHttp;
+
+	impl FailingHttp {
+		fn boxed() -> BoxedHttp {
+			Arc::new(FailingHttp)
+		}
+	}
+
+	impl http::SimpleHttp for FailingHttp {
+		fn make_request(
+			&self,
+			_method: &'static str,
+			url: String,
+		) -> std::pin::Pin<
+			Box<
+				dyn std::future::Future<Output = Result<http::SimpleResponse, AnyError>>
+					+ Send
+					+ '_,
+			>,
+		> {
+			Box::pin(async move { Err(AnyError::from(wrap(url, "unexpected request"))) })
+		}
+	}
+
 	#[test]
 	fn agent_host_bridge_connection_token_is_only_in_command_environment() {
 		let args = CodeServerArgs {
@@ -1014,5 +1195,207 @@ mod tests {
 				)],
 			)
 		);
+	}
+
+	/// A stand-in for a local server build: an executable script that prints
+	/// what `code-server-oss --version` prints, so the commit probe has
+	/// something realistic to read.
+	/// A stand-in for a local server build: something runnable that prints
+	/// what `--version` prints, so the commit probe has something realistic
+	/// to read. Uses a script on Windows, because that is the case that needs
+	/// the `cmd.exe` wrapping to work at all.
+	#[cfg(windows)]
+	fn write_fake_server(dir: &Path, version_output: &str) -> PathBuf {
+		let path = dir.join("code-server-oss.cmd");
+		let body = version_output
+			.lines()
+			.map(|line| format!("echo {line}\r\n"))
+			.collect::<String>();
+		std::fs::write(&path, format!("@echo off\r\n{body}")).unwrap();
+		path
+	}
+
+	#[cfg(unix)]
+	fn write_fake_server(dir: &Path, version_output: &str) -> PathBuf {
+		use std::os::unix::fs::PermissionsExt;
+
+		let path = dir.join("code-server-oss");
+		std::fs::write(
+			&path,
+			format!("#!/bin/sh\ncat <<'EOF'\n{version_output}\nEOF\n"),
+		)
+		.unwrap();
+		std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+		path
+	}
+
+	#[test]
+	fn the_version_commit_is_the_line_before_the_architecture() {
+		assert_eq!(
+			parse_version_commit("1.108.0\nabc123def456\nx64\n"),
+			Some("abc123def456")
+		);
+		// Windows writes \r\n.
+		assert_eq!(
+			parse_version_commit("1.108.0\r\nabc123def456\r\nx64\r\n"),
+			Some("abc123def456")
+		);
+		// A script that launches the server prints its own line first, which
+		// must not shift the version and commit out of place.
+		assert_eq!(
+			parse_version_commit(
+				"Starting server: /out/server-main.js --version\n1.140.0\nabc123def456\nx64\n"
+			),
+			Some("abc123def456")
+		);
+	}
+
+	#[test]
+	fn a_build_without_a_usable_commit_does_not_report_one() {
+		// What an OSS dev build actually prints.
+		assert_eq!(
+			parse_version_commit(
+				"Starting server: /out/server-main.js --version\n1.140.0\nUnknown commit\nx64\n"
+			),
+			None
+		);
+		// No architecture line to anchor on, so there is nothing to trust.
+		assert_eq!(parse_version_commit("1.108.0\nabc123def456"), None);
+		// A separator that would break the `<quality>-<commit>` folder name.
+		assert_eq!(parse_version_commit("1.108.0\nabc/123\nx64"), None);
+		assert_eq!(parse_version_commit("1.108.0\n\nx64"), None);
+		assert_eq!(parse_version_commit(""), None);
+	}
+
+	#[tokio::test]
+	async fn local_server_commit_comes_from_the_builds_own_version() {
+		let dir = tempfile::tempdir().unwrap();
+		// The extra leading line is what a wrapper script such as the OSS
+		// dev `code-server.bat` prints before the server's own output.
+		let path = write_fake_server(
+			dir.path(),
+			"Starting server: /out/server-main.js --version\n1.108.0\nabc123def456\nx64",
+		);
+
+		assert_eq!(
+			resolve_local_server_commit(&log::Logger::test(), &path)
+				.await
+				.unwrap(),
+			"local-abc123def456"
+		);
+	}
+
+	#[tokio::test]
+	async fn local_server_commit_falls_back_to_the_path_when_the_build_does_not_report_one() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = write_fake_server(
+			dir.path(),
+			"Starting server: /out/server-main.js --version\n1.140.0\nUnknown commit\nx64",
+		);
+
+		let commit = resolve_local_server_commit(&log::Logger::test(), &path)
+			.await
+			.unwrap();
+		assert_eq!(
+			commit,
+			local_server_id(&path),
+			"the fallback must be stable for a given path"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_local_server_path_that_does_not_exist_is_an_error() {
+		let dir = tempfile::tempdir().unwrap();
+
+		assert!(matches!(
+			resolve_local_server_commit(&log::Logger::test(), &dir.path().join("nope")).await,
+			Err(AnyError::CodeError(CodeError::LocalServerNotFound(_)))
+		));
+	}
+
+	#[test]
+	fn the_runtime_flag_wins_over_the_build_time_override() {
+		assert_eq!(
+			resolve_local_server(Some("/opt/builds/mine/code-server-oss")),
+			Some(PathBuf::from("/opt/builds/mine/code-server-oss"))
+		);
+		assert_eq!(
+			resolve_local_server(None),
+			OVERRIDE_SERVER_PATH.map(PathBuf::from)
+		);
+	}
+
+	#[tokio::test]
+	async fn resolving_local_server_params_does_not_consult_the_update_service() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("code-server-oss");
+		std::fs::write(&path, "").unwrap();
+
+		// An http client that would fail the test if it were used to look up
+		// a commit: a local build already knows its own.
+		let params = ServerParamsRaw {
+			commit_id: None,
+			quality: Quality::Insiders,
+			code_server_args: CodeServerArgs {
+				local_server: Some(path.clone()),
+				..Default::default()
+			},
+			headless: true,
+			platform: Platform::LinuxX64,
+		};
+
+		let resolved = params
+			.resolve(&log::Logger::test(), FailingHttp::boxed())
+			.await
+			.unwrap();
+
+		assert_eq!(resolved.local_server(), Some(path.as_path()));
+		assert!(resolved.release.commit.starts_with("local-"));
+	}
+
+	#[tokio::test]
+	async fn setup_of_a_local_server_creates_state_but_downloads_nothing() {
+		let dir = tempfile::tempdir().unwrap();
+		let launcher_paths = LauncherPaths::new_without_replacements(dir.path().to_path_buf());
+		let local = dir.path().join("code-server-oss");
+		std::fs::write(&local, "").unwrap();
+
+		let resolved = ResolvedServerParams {
+			release: Release {
+				commit: "local-deadbeef".to_string(),
+				quality: Quality::Insiders,
+				target: TargetKind::Server,
+				name: String::new(),
+				platform: Platform::LinuxX64,
+			},
+			code_server_args: CodeServerArgs {
+				local_server: Some(local.clone()),
+				..Default::default()
+			},
+		};
+
+		let logger = log::Logger::test();
+		let builder = ServerBuilder::new(&logger, &resolved, &launcher_paths, FailingHttp::boxed());
+
+		assert_eq!(builder.server_paths.executable, local);
+		let server_dir = builder.server_paths.server_dir.clone();
+		assert!(!server_dir.exists());
+
+		builder.setup().await.unwrap();
+
+		// The log and pid files live in here, so it has to exist -- otherwise
+		// the server starts but its logfile can't be created.
+		assert!(server_dir.is_dir());
+		// ...but there is no release to unpack into it.
+		assert_eq!(
+			std::fs::read_dir(&server_dir).unwrap().count(),
+			0,
+			"nothing should have been downloaded into {}",
+			server_dir.display()
+		);
+
+		// Evicting must not take the log and pid files with it.
+		builder.evict().await.unwrap();
+		assert!(server_dir.is_dir());
 	}
 }

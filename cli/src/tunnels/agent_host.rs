@@ -5,7 +5,7 @@
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -47,6 +47,7 @@ use super::agent_host_registry::{
 	self, AgentHostEndpointAddress, AgentHostEndpointIdentity, AgentHostEndpointMetadata,
 	AgentHostServerType, AGENT_HOST_PROTOCOL_VERSION,
 };
+use super::code_server::local_server_id;
 use super::idle_timeout;
 use super::paths::{get_server_folder_name, SERVER_FOLDER_NAME};
 use super::shutdown_signal::ShutdownSignal;
@@ -102,6 +103,9 @@ pub struct AgentHostConfig {
 	pub without_connection_token: bool,
 	pub connection_token: Option<String>,
 	pub connection_token_file: Option<String>,
+	/// A server build on this machine to run instead of downloading a server
+	/// release. Set from `--server-path` / `VSCODE_CLI_SERVER_PATH`.
+	pub local_server: Option<PathBuf>,
 }
 
 /// State of the running VS Code server process. The process itself is
@@ -179,6 +183,11 @@ impl AgentHostManager {
 		})
 	}
 
+	/// The local server build this manager runs, if one was configured.
+	pub fn local_server(&self) -> Option<&Path> {
+		self.config.local_server.as_deref()
+	}
+
 	/// Returns an endpoint to a running agent host, starting one if needed.
 	async fn ensure_server(self: &Arc<Self>) -> Result<PathBuf, CodeError> {
 		// Fast path: if we already have a barrier, wait on it
@@ -254,8 +263,8 @@ impl AgentHostManager {
 		server_dir: PathBuf,
 		opener: BarrierOpener<Result<PathBuf, String>>,
 	) {
-		let executable = if let Some(p) = option_env!("VSCODE_CLI_OVERRIDE_SERVER_PATH") {
-			PathBuf::from(p)
+		let executable = if let Some(p) = &self.config.local_server {
+			p.clone()
 		} else {
 			server_dir
 				.join(SERVER_FOLDER_NAME)
@@ -442,12 +451,12 @@ impl AgentHostManager {
 	/// cached version. Only fetches from the network and downloads if
 	/// nothing is cached at all.
 	async fn get_cached_or_download(&self) -> Result<(Release, PathBuf), CodeError> {
-		// When using a dev override, skip the update service entirely -
-		// the override path is used directly by run_server().
-		if option_env!("VSCODE_CLI_OVERRIDE_SERVER_PATH").is_some() {
+		// When running a local build, skip the update service entirely -
+		// the local executable is used directly by run_server().
+		if let Some(p) = &self.config.local_server {
 			let release = Release {
 				name: String::new(),
-				commit: String::from("dev"),
+				commit: local_server_id(p),
 				platform: self.platform,
 				target: TargetKind::Server,
 				quality: Quality::Insiders,
@@ -2329,6 +2338,7 @@ mod tests {
 				without_connection_token: true,
 				connection_token: None,
 				connection_token_file: None,
+				local_server: None,
 			},
 			activity,
 		)
