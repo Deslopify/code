@@ -3060,4 +3060,15 @@ export default defineConfig(
 		rules: {
 			'local/code-no-new-javascript-files': 'error',
 		},
+	},
+	// Exclude packages/ from header/header
+	{
+		files: [
+			'packages/**/*.js',
+			'packages/**/*.ts',
+			'packages/**/*.mts',
+		],
+		rules: {
+			'header/header': 'off',
+		},
 	});
