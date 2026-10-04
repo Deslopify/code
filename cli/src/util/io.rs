@@ -314,11 +314,7 @@ mod tests {
 		let mut written = vec![];
 		let base_line = "Elit ipsum cillum ex cillum. Adipisicing consequat cupidatat do proident ut in sunt Lorem ipsum tempor. Eiusmod ipsum Lorem labore exercitation sunt pariatur excepteur fugiat cillum velit cillum enim. Nisi Lorem cupidatat ad enim velit officia eiusmod esse tempor aliquip. Deserunt pariatur tempor in duis culpa esse sit nulla irure ullamco ipsum voluptate non laboris. Occaecat officia nulla officia mollit do aliquip reprehenderit ad incididunt.";
 		for i in 0..100 {
-			let line = format!(
-				"{}: {}",
-				i,
-				&base_line[..rng.gen_range(0..base_line.len())]
-			);
+			let line = format!("{}: {}", i, &base_line[..rng.gen_range(0..base_line.len())]);
 			writeln!(&mut read_file, "{line}").unwrap();
 			written.push(line);
 		}

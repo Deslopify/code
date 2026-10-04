@@ -22,7 +22,7 @@ use crate::tunnels::agent_host::{
 	AgentHostReuseDecision, AgentHostSidecar, LoopbackAuth,
 };
 use crate::tunnels::agent_host_registry::{self, AgentHostEndpointIdentity, AgentHostServerType};
-use crate::tunnels::code_server::CodeServerArgs;
+use crate::tunnels::code_server::{resolve_local_server, CodeServerArgs};
 use crate::tunnels::dev_tunnels::DevTunnels;
 use crate::tunnels::idle_timeout::{self, TokioIdleSleeper};
 use crate::tunnels::ready_active_agent_host;
@@ -315,6 +315,7 @@ async fn run_supervisor(mut ctx: CommandContext, mut args: AgentHostArgs) -> Res
 			without_connection_token: true,
 			connection_token: None,
 			connection_token_file: None,
+			local_server: resolve_local_server(args.server_path.as_deref()),
 		},
 		// The backend counts as activity while it runs, so the idle timeout
 		// can't kill agent sessions that are still working after the last
@@ -323,9 +324,9 @@ async fn run_supervisor(mut ctx: CommandContext, mut args: AgentHostArgs) -> Res
 	);
 
 	// Eagerly resolve the latest version so the first connection is fast,
-	// and kick off the background update loop. Skip when using a dev
-	// override since updates don't apply.
-	if option_env!("VSCODE_CLI_OVERRIDE_SERVER_PATH").is_none() {
+	// and kick off the background update loop. Skip when running a local
+	// build since updates don't apply.
+	if manager.local_server().is_none() {
 		match manager.get_latest_release().await {
 			Ok(release) => {
 				if let Err(e) = manager.ensure_downloaded(&release).await {
@@ -738,10 +739,12 @@ async fn daemonize_supervisor() -> Result<i32, AnyError> {
 /// Ensure an agent host supervisor is running on this machine and return
 /// the live endpoint to dial. Used by callers that want to reuse the
 /// supervisor regardless of who started it (e.g. `code tunnel`'s
-/// SpawnFresh branch).
+/// SpawnFresh branch). `extra_args` are forwarded to the spawned
+/// supervisor, e.g. a `--server-path` picked by the caller.
 pub async fn ensure_supervisor_running(
 	launcher_paths: &LauncherPaths,
 	log: &log::Logger,
+	extra_args: &[String],
 ) -> Result<ActiveAgentHost, AnyError> {
 	let user_data_path = resolve_user_data_path(None);
 	if let AgentHostReuseDecision::Reuse {
@@ -765,7 +768,7 @@ pub async fn ensure_supervisor_running(
 		"No agent host supervisor running; starting one in the background"
 	);
 
-	spawn_supervisor_and_wait_ready(launcher_paths, log, &[]).await?;
+	spawn_supervisor_and_wait_ready(launcher_paths, log, extra_args).await?;
 
 	match classify_agent_host(log, &user_data_path).await {
 		AgentHostReuseDecision::Reuse {
