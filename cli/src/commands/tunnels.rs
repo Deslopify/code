@@ -162,8 +162,11 @@ pub async fn command_shell(ctx: CommandContext, args: CommandShellArgs) -> Resul
 	let active_agent_host: SharedActiveAgentHost = {
 		let paths = ctx.paths.clone();
 		let log = ctx.log.clone();
+		// Forward any local server build so the supervisor runs the same one
+		// the tunnel's VS Code server will.
+		let extra_args = args.server_args.local_server_args();
 		async move {
-			ensure_supervisor_running(&paths, &log)
+			ensure_supervisor_running(&paths, &log, &extra_args)
 				.await
 				.map(Arc::new)
 				.map_err(Arc::new)
