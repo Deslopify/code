@@ -199,6 +199,16 @@ async fn preload_extensions(
 	sb.install_extensions().await
 }
 
+/// Command line arguments that reproduce a local server build selection in a
+/// spawned `code` process, so an agent host supervisor we start runs the same
+/// build the tunnel's VS Code server does. Empty when no build was selected.
+fn local_server_args(code_server_args: &CodeServerArgs) -> Vec<String> {
+	match code_server_args.local_server.as_deref() {
+		Some(p) => vec!["--server-path".to_string(), p.display().to_string()],
+		None => vec![],
+	}
+}
+
 /// Options controlling how a tunnel serves the agent host, all supplied by the
 /// editor that started the tunnel.
 #[derive(Clone, Debug, Default)]
@@ -252,8 +262,11 @@ pub async fn serve(
 	let active_agent_host: SharedActiveAgentHost = {
 		let launcher_paths = launcher_paths.clone();
 		let log = log.clone();
+		// Forward any local server build so the supervisor runs the same one
+		// the tunnel's VS Code server will.
+		let extra_args = local_server_args(code_server_args);
 		async move {
-			ensure_supervisor_running(&launcher_paths, &log)
+			ensure_supervisor_running(&launcher_paths, &log, &extra_args)
 				.await
 				.map(Arc::new)
 				.map_err(Arc::new)
@@ -917,12 +930,16 @@ async fn handle_serve(
 					// we don't loop to avoid doing so infinitely: allow the client to reconnect in this case.
 					// Permission errors (ServerNotExecutable) are not "corruption" -- re-downloading
 					// will not fix them, so skip eviction and let the user see the real error.
+					// A local build isn't ours to evict, and re-downloading wouldn't
+					// change it either.
 					if let AnyError::CodeError(CodeError::ServerUnexpectedExit(ref e)) = e {
-						warning!(
-							c.log,
-							"({}), removing server due to possible corruptions",
-							e
-						);
+						if resolved.local_server().is_none() {
+							warning!(
+								c.log,
+								"({}), removing server due to possible corruptions",
+								e
+							);
+						}
 						if let Err(e) = sb.evict().await {
 							warning!(c.log, "Failed to evict server: {}", e);
 						}

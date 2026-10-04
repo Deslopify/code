@@ -379,7 +379,11 @@ mod tests {
 
 		let deadline = Instant::now() + Duration::from_secs(10);
 		loop {
-			let alive: Vec<u32> = all_pids.iter().copied().filter(|p| process_exists(*p)).collect();
+			let alive: Vec<u32> = all_pids
+				.iter()
+				.copied()
+				.filter(|p| process_exists(*p))
+				.collect();
 			if alive.is_empty() {
 				break;
 			}
