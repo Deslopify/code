@@ -13,7 +13,7 @@ const isWin = process.platform === 'win32';
 const codeScript = path.join(
 	repoRoot,
 	'scripts',
-	isWin ? 'code.bat' : 'code.sh',
+	isWin ? 'code-server.bat' : 'code-server.sh',
 );
 
 const appData = process.env.APPDATA || process.env.HOME;
@@ -32,7 +32,7 @@ const extensionsDir = path.join(userHome, '.vscode', 'extensions');
 
 spawn(
 	codeScript,
-	[`--user-data-dir=${userDataDir}`, `--extensions-dir=${extensionsDir}`],
+	['--accept-server-license-terms', `--user-data-dir=${userDataDir}`, `--extensions-dir=${extensionsDir}`],
 	{
 		cwd: repoRoot,
 		stdio: 'inherit',
