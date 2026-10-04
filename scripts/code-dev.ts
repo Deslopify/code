@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// @ts-check
-
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
