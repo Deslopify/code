@@ -158,7 +158,9 @@ mod tests {
 		header.set_entry_type(tar::EntryType::Directory);
 		header.set_mode(0o755);
 		header.set_cksum();
-		builder.append_data(&mut header, name, std::io::empty()).unwrap();
+		builder
+			.append_data(&mut header, name, std::io::empty())
+			.unwrap();
 	}
 
 	fn write_file_entry(builder: &mut Builder<GzEncoder<Vec<u8>>>, name: &str, contents: &[u8]) {
@@ -195,7 +197,8 @@ mod tests {
 		fs::create_dir_all(&out_dir).unwrap();
 
 		let file = fs::File::open(&tar_path).unwrap();
-		decompress_tarball(file, &out_dir, SilentCopyProgress()).expect("extraction should succeed");
+		decompress_tarball(file, &out_dir, SilentCopyProgress())
+			.expect("extraction should succeed");
 
 		assert_eq!(fs::read(out_dir.join("file.txt")).unwrap(), b"hello");
 		assert_eq!(fs::read(out_dir.join("sub/nested.txt")).unwrap(), b"world");
