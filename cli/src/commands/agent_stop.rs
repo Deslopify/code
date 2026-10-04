@@ -80,7 +80,7 @@ pub async fn agent_stop(ctx: CommandContext, args: AgentStopArgs) -> Result<i32,
 				"Agent host returned an invalid active turn start timestamp",
 			)
 		})?;
-		
+
 		// Defensive programming: Prevent negative duration values caused by clock skew
 		let now_ms = Timestamp::now().as_millisecond();
 		let started_ms = started_at.as_millisecond();

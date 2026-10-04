@@ -3,7 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 use crate::{
-	constants::{APPLICATION_NAME, CONTROL_PORT, DOCUMENTATION_URL, QUALITYLESS_PRODUCT_NAME},
+	constants::{
+		APPLICATION_NAME, CONTROL_PORT, DOCUMENTATION_URL, QUALITYLESS_PRODUCT_NAME,
+		QUALITYLESS_SERVER_NAME,
+	},
 	rpc::ResponseError,
 };
 use std::fmt::Display;
@@ -523,6 +526,10 @@ pub enum CodeError {
 	ServerUnexpectedExit(String),
 	#[error("Server binary is not executable: {0}")]
 	ServerNotExecutable(String),
+	#[error(
+		"No {QUALITYLESS_SERVER_NAME} build was found at the path given to --server-path: {0}"
+	)]
+	LocalServerNotFound(String),
 	#[error("no agent host could be reached: {0}")]
 	NoAgentHostReachable(String),
 	#[error("no session matching \"{0}\" was found on any discovered agent host")]

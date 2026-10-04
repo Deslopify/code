@@ -1360,7 +1360,8 @@ mod tests {
 	}
 
 	#[test]
-	fn read_ignores_entry_files_whose_name_mismatches_identity() {		let dir = tempfile::tempdir().unwrap();
+	fn read_ignores_entry_files_whose_name_mismatches_identity() {
+		let dir = tempfile::tempdir().unwrap();
 		let log = log::Logger::test();
 		let legit = standalone(std::process::id(), "legit", 8080);
 		publish_agent_host_endpoint(&log, dir.path(), &legit).unwrap();
