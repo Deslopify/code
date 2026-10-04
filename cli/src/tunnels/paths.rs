@@ -21,6 +21,12 @@ use crate::{
 
 pub const SERVER_FOLDER_NAME: &str = "server";
 
+/// A server executable baked into the CLI at build time. OSS development
+/// builds use this to run a server out of a checkout instead of a downloaded
+/// release; it is the fallback for the runtime `--server-path` override.
+pub const OVERRIDE_SERVER_PATH: Option<&'static str> =
+	option_env!("VSCODE_CLI_OVERRIDE_SERVER_PATH");
+
 pub struct ServerPaths {
 	// Directory into which the server is downloaded
 	pub server_dir: PathBuf,
@@ -92,7 +98,7 @@ impl InstalledServer {
 		let server_dir = self.get_install_folder(p);
 		ServerPaths {
 			// allow using the OSS server in development via an override
-			executable: if let Some(p) = option_env!("VSCODE_CLI_OVERRIDE_SERVER_PATH") {
+			executable: if let Some(p) = OVERRIDE_SERVER_PATH {
 				PathBuf::from(p)
 			} else {
 				server_dir
