@@ -1,0 +1,21 @@
+{
+  "name": "vsda",
+  "description": "VS Code debug handshake module",
+  "version": "1.4.4",
+  "author": {
+    "name": "Microsoft"
+  },
+  "homepage": "https://github.com/Microsoft/vscode",
+  "type": "module",
+  "main": "out/esm/vsda.js",
+  "browser": "out/web/vsda.js",
+  "types": "out/esm/vsda.d.ts",
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.esm.json && esbuild src/vsda.ts --bundle --format=iife --global-name=vsda_web --platform=browser --target=es2022 --outfile=out/web/vsda.js"
+  }
+}

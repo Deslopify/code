@@ -213,6 +213,9 @@ importers:
       vscode-textmate:
         specifier: ^9.3.2
         version: 9.3.2
+      vsda:
+        specifier: file:packages/vsda
+        version: file:packages/vsda
       ws:
         specifier: ^8.19.0
         version: 8.21.0
@@ -6600,6 +6603,10 @@ packages:
 
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
+
+  vsda@file:packages/vsda:
+    resolution: {directory: packages/vsda, type: directory}
+    os: [win32, linux, darwin]
 
   warnings-to-errors-webpack-plugin@2.3.0:
     resolution: {integrity: sha512-fzOyw+Ctr2MqJ+4UXKobDiOLzMMSBAdvGMWvZ4NRgTBCofAL2mmdfr6/Of3Bqz9Sq6R6xT5dLs6nnLLCtmppeQ==}
@@ -13365,6 +13372,8 @@ snapshots:
   vscode-uri@3.0.3: {}
 
   vscode-uri@3.1.0: {}
+
+  vsda@file:packages/vsda: {}
 
   warnings-to-errors-webpack-plugin@2.3.0(webpack@5.105.4):
     dependencies:

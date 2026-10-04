@@ -946,7 +946,7 @@ suite('WorkspaceContextService - Folder', () => {
 				environmentService,
 				TestProductService,
 				disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)),
-				new SignService(TestProductService), new NullLogService())),
+				new SignService(), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
 			new NullPolicyService()));
@@ -996,7 +996,7 @@ suite('WorkspaceContextService - Folder', () => {
 			userDataProfileService,
 			userDataProfilesService,
 			fileService,
-			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
 			new NullPolicyService()));
@@ -1028,7 +1028,7 @@ suite('WorkspaceContextService - Folder', () => {
 			userDataProfileService,
 			userDataProfilesService,
 			fileService,
-			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
 			new NullPolicyService()));
