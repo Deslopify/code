@@ -5,7 +5,10 @@
 
 use std::{fmt, path::PathBuf};
 
-use crate::{constants, log, options, tunnels::code_server::CodeServerArgs};
+use crate::{
+	constants, log, options,
+	tunnels::code_server::{resolve_local_server, CodeServerArgs},
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use const_format::concatcp;
 
@@ -258,6 +261,12 @@ pub struct AgentHostArgs {
 	/// Specifies the directory that server data is kept in.
 	#[clap(long)]
 	pub server_data_dir: Option<String>,
+
+	/// Runs the VS Code server from a build on this machine instead of
+	/// downloading a server release. The path must point at the server
+	/// executable, e.g. `server-linux-x64/bin/code-server-oss`.
+	#[clap(long, env = "VSCODE_CLI_SERVER_PATH")]
+	pub server_path: Option<String>,
 
 	/// Overrides the resolved user data directory used to home the local
 	/// agent-host endpoint registry
@@ -963,6 +972,14 @@ pub struct BaseServerArgs {
 	/// Reconnection grace time in seconds. Defaults to 10800 (3 hours).
 	#[clap(long)]
 	pub reconnection_grace_time: Option<u32>,
+
+	/// Runs the VS Code server from a build on this machine instead of
+	/// downloading a server release. The path must point at the server
+	/// executable, e.g. `server-linux-x64/bin/code-server-oss`. Also
+	/// forwarded to the agent host supervisor this command may start, so the
+	/// whole tunnel runs the same build.
+	#[clap(long, env = "VSCODE_CLI_SERVER_PATH")]
+	pub server_path: Option<String>,
 }
 
 impl BaseServerArgs {
@@ -980,6 +997,19 @@ impl BaseServerArgs {
 
 		if let Some(t) = self.reconnection_grace_time {
 			csa.reconnection_grace_time = Some(t);
+		}
+
+		if let Some(p) = resolve_local_server(self.server_path.as_deref()) {
+			csa.local_server = Some(p);
+		}
+	}
+
+	/// Command line arguments that reproduce this local server override in a
+	/// spawned `code` process, or empty if there is no override to forward.
+	pub fn local_server_args(&self) -> Vec<String> {
+		match resolve_local_server(self.server_path.as_deref()) {
+			Some(p) => vec!["--server-path".to_string(), p.display().to_string()],
+			None => vec![],
 		}
 	}
 }
@@ -1105,6 +1135,7 @@ pub enum AuthProvider {
 mod tests {
 	use super::{Commands, IntegratedCli};
 	use clap::Parser;
+	use std::path::Path;
 
 	const MACHINE_STATUS_ENV: &str = "VSCODE_CLI_MACHINE_STATUS";
 
@@ -1138,11 +1169,55 @@ mod tests {
 		assert!(!parse_machine_status(&["code", "tunnel"]));
 
 		std::env::remove_var(MACHINE_STATUS_ENV);
-		assert!(parse_machine_status(&["code", "tunnel", "--machine-status"]));
+		assert!(parse_machine_status(&[
+			"code",
+			"tunnel",
+			"--machine-status"
+		]));
 
 		match previous_value {
 			Some(value) => std::env::set_var(MACHINE_STATUS_ENV, value),
 			None => std::env::remove_var(MACHINE_STATUS_ENV),
 		}
+	}
+
+	/// Unlike the test above this one does not touch the environment, so it
+	/// can't race with it: `clap` only reads `VSCODE_CLI_SERVER_PATH`, and the
+	/// flag takes precedence over it either way.
+	#[test]
+	fn server_path_reaches_the_server_and_is_forwarded_to_spawned_processes() {
+		let cli = IntegratedCli::try_parse_from([
+			"code",
+			"tunnel",
+			"--server-path",
+			"/opt/builds/mine/code-server-oss",
+		])
+		.unwrap();
+		let Some(Commands::Tunnel(tunnel_args)) = cli.core.subcommand else {
+			panic!("expected tunnel arguments");
+		};
+		let serve_args = tunnel_args.serve_args.server_args;
+
+		let mut code_server_args = crate::tunnels::code_server::CodeServerArgs::default();
+		serve_args.apply_to(&mut code_server_args);
+		assert_eq!(
+			code_server_args.local_server.as_deref(),
+			Some(Path::new("/opt/builds/mine/code-server-oss"))
+		);
+		assert!(
+			!code_server_args
+				.command_arguments()
+				.iter()
+				.any(|a| a.contains("server-path")),
+			"the server must not be told about the path, it is running from it"
+		);
+
+		assert_eq!(
+			serve_args.local_server_args(),
+			vec![
+				"--server-path".to_string(),
+				"/opt/builds/mine/code-server-oss".to_string()
+			]
+		);
 	}
 }

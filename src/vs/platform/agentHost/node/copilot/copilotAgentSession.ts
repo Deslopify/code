@@ -6666,7 +6666,7 @@ export class CopilotAgentSession extends Disposable {
 				const telemetrySession = parentToolCallId
 					? URI.parse(buildSubagentSessionUri(this._storageUri.toString(), parentToolCallId))
 					: this.resourceUri;
-				reportCopilotTodoStoreOperation(this._telemetryService, telemetrySession, e.data.toolCallId, tracked.toolName, tracked.parameters, this._currentTurn.value?.clientContext);
+				reportCopilotTodoStoreOperation(this._telemetryService, telemetrySession, e.data.toolCallId, tracked.toolName, tracked.parameters, this._currentTurn.value?.clientContext, parentToolCallId && this._fusionPhaseLabels.has(parentToolCallId) ? 'fusionPhase' : undefined);
 			}
 			this._logService.info(`[Copilot:${sessionId}] Tool completed: ${e.data.toolCallId}`);
 			this._reportToolApprovalIfNoPermission(e.data.toolCallId);
@@ -8202,6 +8202,8 @@ export class CopilotAgentSession extends Disposable {
 			agentName: COPILOT_FUSION_PHASE_AGENT_NAME,
 			agentDisplayName: label,
 			taskDescription: label,
+			subagentKind: 'fusionPhase',
+			model: this._fusionProgress.getPhaseModel(toolCallId),
 		});
 	}
 
@@ -8416,6 +8418,13 @@ export class CopilotAgentSession extends Disposable {
 				? { type: e.type, id: e.id, timestamp: e.timestamp, parentId: e.parentId, ephemeral: e.ephemeral, agentId: e.agentId }
 				: e;
 			this._logService.trace(`[Copilot:${sessionId}] Unhandled SDK event: ${safeStringify(loggedEvent)}`);
+		}));
+
+		this._register(wrapper.onIndexedSearch(e => {
+			const data = e.data.kind === 'startup' || e.data.kind === 'server_error'
+				? (({ errorMessage: _, ...data }) => data)(e.data)
+				: e.data;
+			this._logService.trace(`[Copilot:${sessionId}] session.indexed_search: ${safeStringify(data)}`);
 		}));
 
 		this._register(wrapper.onExtensionsLoaded(() => {
