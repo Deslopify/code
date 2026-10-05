@@ -35,8 +35,8 @@ importers:
         specifier: ^2.5.6
         version: 2.5.6
       '@vscode/copilot-api':
-        specifier: file:../../copilot-api
-        version: file:../../copilot-api
+        specifier: file:../packages/vscode-capi
+        version: file:../packages/vscode-capi
       '@vscode/deviceid':
         specifier: file:../../vscode-deviceid
         version: file:../../vscode-deviceid
@@ -286,8 +286,8 @@ packages:
   '@vscode/codicons@0.0.46-49':
     resolution: {integrity: sha512-0McyVlyRjenut3PBwULxuaC5YoKPF8qkNHf9DhS6UOXUmLr31Ga6vECnNx70SSIZnI4ULLOEktcIkRqiwFvkbg==}
 
-  '@vscode/copilot-api@file:../../copilot-api':
-    resolution: {directory: ../../copilot-api, type: directory}
+  '@vscode/copilot-api@file:../packages/vscode-capi':
+    resolution: {directory: ../packages/vscode-capi, type: directory}
 
   '@vscode/deviceid@file:../../vscode-deviceid':
     resolution: {directory: ../../vscode-deviceid, type: directory}
@@ -797,7 +797,7 @@ snapshots:
 
   '@vscode/codicons@0.0.46-49': {}
 
-  '@vscode/copilot-api@file:../../copilot-api': {}
+  '@vscode/copilot-api@file:../packages/vscode-capi': {}
 
   '@vscode/deviceid@file:../../vscode-deviceid':
     dependencies:

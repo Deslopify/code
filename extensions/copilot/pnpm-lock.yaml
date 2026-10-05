@@ -86,8 +86,8 @@ importers:
         specifier: 2.1.0
         version: 2.1.0
       '@vscode/copilot-api':
-        specifier: file:../../../copilot-api
-        version: file:../../../copilot-api
+        specifier: file:../../packages/vscode-capi
+        version: file:../../packages/vscode-capi
       '@vscode/extension-telemetry':
         specifier: ^1.5.1
         version: 1.5.1
@@ -363,8 +363,8 @@ importers:
         specifier: 2.1.0
         version: 2.1.0
       '@vscode/copilot-api':
-        specifier: file:../../../../copilot-api
-        version: file:../../../copilot-api
+        specifier: file:../../../packages/vscode-capi
+        version: file:../../packages/vscode-capi
       '@vscode/l10n':
         specifier: ^0.0.18
         version: 0.0.18
@@ -2106,8 +2106,8 @@ packages:
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
 
-  '@vscode/copilot-api@file:../../../copilot-api':
-    resolution: {directory: ../../../copilot-api, type: directory}
+  '@vscode/copilot-api@file:../../packages/vscode-capi':
+    resolution: {directory: ../../packages/vscode-capi, type: directory}
 
   '@vscode/extension-telemetry@1.5.1':
     resolution: {integrity: sha512-rnRRQIRCwRdbcQ0QV5ajKJRz8noEIoQA2hX9VjAlVAVB85+ClbaPNhljobFXgW31ue69FRO6KPE4XJ/lLgKt/Q==}
@@ -7520,7 +7520,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@vscode/copilot-api@file:../../../copilot-api': {}
+  '@vscode/copilot-api@file:../../packages/vscode-capi': {}
 
   '@vscode/extension-telemetry@1.5.1':
     dependencies:
