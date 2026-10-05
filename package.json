@@ -1,7 +1,7 @@
 {
   "name": "code-oss-dev",
   "version": "1.141.0",
-  "distro": "a620eb1a35f4f1994abbd67502c0b2c3b8e73ee0",
+  "distro": "a0e7521b2a1e3289e4118fad155277b200aebd35",
   "author": {
     "name": "Microsoft Corporation"
   },
@@ -115,7 +115,7 @@
     "@parcel/watcher": "^2.5.6",
     "@types/semver": "^7.5.8",
     "@vscode/codicons": "^0.0.46-40",
-    "@vscode/copilot-api": "file:../copilot-api",
+    "@vscode/copilot-api": "file:packages/vscode-capi",
     "@vscode/deviceid": "file:../vscode-deviceid",
     "@vscode/diff": "0.0.2-7",
     "@vscode/fs-copyfile": "2.0.0",
@@ -331,5 +331,5 @@
     "esbuild": true,
     "@vscode/vsce-sign": true
   },
-  "copilotRuntimeVersion": "1.0.92-0"
+  "copilotRuntimeVersion": "1.0.92-4"
 }
