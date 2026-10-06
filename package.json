@@ -1,6 +1,6 @@
 {
   "name": "code-oss-dev",
-  "version": "1.141.0",
+  "version": "1.142.0",
   "distro": "a0e7521b2a1e3289e4118fad155277b200aebd35",
   "author": {
     "name": "Microsoft Corporation"
@@ -14,7 +14,7 @@
     "test": "node -e \"console.error('Run a test script from the scripts folder, for example: ./scripts/test.sh --run <file>.'); process.exit(1)\"",
     "test-browser": "npx playwright install && node test/unit/browser/index.js",
     "test-browser-no-install": "node test/unit/browser/index.js",
-    "test-node": "mocha test/unit/node/index.js --delay --ui=tdd --timeout=5000 --exit",
+    "test-node": "mocha test/unit/node/index.js --delay --ui=tdd --exit",
     "test-extension": "vscode-test",
     "test-build-scripts": "cd build && npm run test",
     "test-agent-host-e2e": "node scripts/test-agent-host-e2e.ts",
@@ -151,6 +151,7 @@
     "jschardet": "3.1.4",
     "katex": "^0.16.22",
     "kerberos": "2.1.1",
+    "libsodium-wrappers": "^0.8.4",
     "minimist": "^1.2.8",
     "native-is-elevated": "0.9.0",
     "native-keymap": "^3.3.5",
@@ -331,5 +332,5 @@
     "esbuild": true,
     "@vscode/vsce-sign": true
   },
-  "copilotRuntimeVersion": "1.0.92-4"
+  "copilotRuntimeVersion": "1.0.92-5"
 }
