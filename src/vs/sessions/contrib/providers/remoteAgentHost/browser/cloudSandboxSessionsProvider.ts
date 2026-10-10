@@ -6,18 +6,20 @@
 import { raceCancellationError, Sequencer } from '../../../../../base/common/async.js';
 import { CancellationError } from '../../../../../base/common/errors.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { constObservable } from '../../../../../base/common/observable.js';
+import { constObservable, derived, IObservable } from '../../../../../base/common/observable.js';
 import { isEqual } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { AgentSession, type IAgentSessionMetadata } from '../../../../../platform/agentHost/common/agent.js';
-import { CLOUD_SANDBOX_AGENT_PROVIDER, CLOUD_SANDBOX_SESSION_SCHEME, CloudSandboxRequestError, isRetryableCloudSandboxError } from '../../../../../platform/agentHost/common/cloudSandboxAgentHost.js';
+import { CLOUD_SANDBOX_AGENT_PROVIDER, CLOUD_SANDBOX_SESSION_SCHEME, CloudSandboxAutoConnectOnOpenSettingId, CloudSandboxRequestError, isRetryableCloudSandboxError } from '../../../../../platform/agentHost/common/cloudSandboxAgentHost.js';
 import { StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import type { ISession } from '../../../../services/sessions/common/session.js';
 import type { AgentHostSessionAdapter } from '../../agentHost/browser/baseAgentHostSessionsProvider.js';
 import { RemoteAgentHostSessionsProvider } from './remoteAgentHostSessionsProvider.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { validateSessionConfigWrite } from '../../../../../platform/agentHost/common/sessionConfigProperties.js';
+import { RemoteAgentHostConnectionStatus } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
+import { readSessionWorkspaceless } from '../../../../../platform/agentHost/common/state/sessionState.js';
 
 /**
  * Sessions provider for a Copilot cloud sandbox.
@@ -27,6 +29,11 @@ import { validateSessionConfigWrite } from '../../../../../platform/agentHost/co
  * session is real, addressable, and unknown to the host all at once.
  */
 export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvider {
+	private readonly _configurationUnavailable = derived(this, reader =>
+		!RemoteAgentHostConnectionStatus.isConnected(this.connectionStatus.read(reader)) || this.authenticationPending.read(reader) || this.passiveRelay.read(reader));
+
+	protected override get supportsOfflineDrafts(): boolean { return true; }
+
 	override get environment() {
 		return { id: 'cloud', label: localize('environment.cloud', "Cloud") };
 	}
@@ -36,9 +43,9 @@ export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvide
 	/** Sandboxes are per-session environments, not persistent Automation hosts. */
 	override get automations(): undefined { return undefined; }
 
-	protected override _adoptCachedSessionMeta(meta: IAgentSessionMetadata): IAgentSessionMetadata {
+	protected override _adoptCachedSessionMeta(meta: IAgentSessionMetadata): IAgentSessionMetadata | undefined {
 		const adopted = super._adoptCachedSessionMeta(meta);
-		return adopted.session.scheme === CLOUD_SANDBOX_AGENT_PROVIDER && adopted.provider === CLOUD_SANDBOX_AGENT_PROVIDER
+		return adopted?.session.scheme === CLOUD_SANDBOX_AGENT_PROVIDER && adopted.provider === CLOUD_SANDBOX_AGENT_PROVIDER
 			? { ...adopted, session: adopted.session.with({ scheme: CLOUD_SANDBOX_SESSION_SCHEME }) }
 			: adopted;
 	}
@@ -86,6 +93,7 @@ export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvide
 			...super._adapterOptions(),
 			preserveStatusWhenDisconnected: true,
 			useSessionTitleForDefaultChat: true,
+			isSessionTitlePlaceholder: (title: string, session: URI) => session.scheme === CLOUD_SANDBOX_SESSION_SCHEME && title === AgentSession.id(session),
 			externalSessionState: (resource: URI, store: DisposableStore) => {
 				const key = this._localSessionStorageKey(AgentSession.id(resource));
 				store.add(this._chatService.onDidAcceptRequest(({ chatSessionResource }) => {
@@ -122,6 +130,40 @@ export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvide
 	protected override _onBackendSessionRemoved(rawId: string): void {
 		super._onBackendSessionRemoved(rawId);
 		this._pendingSessionTitles.delete(rawId);
+	}
+
+	/** Reopened cached chats also need a background connection, even when content activation is skipped. */
+	override async prepareSessionForOpen(): Promise<void> {
+		if (this._baseConfigurationService.getValue<boolean>(CloudSandboxAutoConnectOnOpenSettingId) === true
+			&& !this.connection && RemoteAgentHostConnectionStatus.isDisconnected(this.connectionStatus.get())) {
+			void this.connect().catch(error => {
+				this._logService.warn('[CloudSandboxSessionsProvider] Background connection on open failed', error);
+			});
+		}
+	}
+
+	override isSessionConfigResolving(sessionId: string): IObservable<boolean> {
+		const resolving = super.isSessionConfigResolving(sessionId);
+		return derived(this, reader => this._configurationUnavailable.read(reader) || resolving.read(reader));
+	}
+
+	override async setSessionConfigValue(sessionId: string, property: string, value: unknown): Promise<void> {
+		this._assertConfigurationAvailable();
+		await super.setSessionConfigValue(sessionId, property, value);
+	}
+
+	override async replaceSessionConfig(sessionId: string, values: Record<string, unknown>): Promise<void> {
+		this._assertConfigurationAvailable();
+		await super.replaceSessionConfig(sessionId, values);
+	}
+
+	private _assertConfigurationAvailable(): void {
+		if (this.passiveRelay.get()) {
+			throw new Error(localize('cloudSandbox.settingsReadOnly', "This connection is read-only. Session settings cannot be changed."));
+		}
+		if (this._configurationUnavailable.get()) {
+			throw new Error(localize('cloudSandbox.settingsUnavailable', "Connect to the environment before changing session settings."));
+		}
 	}
 
 	protected override _resolveArchivedState(sessionKey: string, isArchived: boolean): boolean {
@@ -178,7 +220,7 @@ export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvide
 		} else if (this.connection) {
 			return super.renameSession(sessionId, title);
 		}
-		session.title.set(title, undefined);
+		session.setTitleFromUser(title);
 		this._onDidChangeSessions.fire({ added: [], removed: [], changed: [session] });
 	}
 
@@ -238,7 +280,7 @@ export class CloudSandboxSessionsProvider extends RemoteAgentHostSessionsProvide
 			return;
 		}
 		const adapter = this.createAdapter(meta);
-		adapter.updateDiscoveryMetadata(meta);
+		adapter.updateDiscoveryMetadata(meta, readSessionWorkspaceless(meta._meta) || undefined);
 		this._sessionCache.set(meta.session.toString(), adapter);
 		this._withheldSessions.add(meta.session.toString());
 		// No deadline yet: the clock starts when the host first omits it.
