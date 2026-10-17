@@ -33,7 +33,6 @@ import { registerAgentHostCoreServices, registerAgentHostHostServices } from './
 import { StrictServiceCollection } from '../../instantiation/common/strictServiceCollection.js';
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IByokLmBridgeRegistry, NullByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
-import { registerPendingEditContentProvider } from './copilot/pendingEditContentStore.js';
 import { SessionDataService } from './sessionDataService.js';
 import { CompatibleAgentHostDatabase } from './compatibleAgentHostDatabase.js';
 import { IAgentCustomizationSettingsRegistration } from '../common/agentCustomizationSettings.js';
@@ -115,7 +114,6 @@ export async function createAgentHostRuntime(options: ICreateAgentHostRuntimeOpt
 	try {
 		const fileService = infrastructure.add(new FileService(logService));
 		infrastructure.add(fileService.registerProvider(Schemas.file, infrastructure.add(new DiskFileSystemProvider(logService))));
-		infrastructure.add(registerPendingEditContentProvider(fileService));
 		const orchestratorDatabase = infrastructure.add(new CompatibleAgentHostDatabase(
 			joinPath(environmentService.appSettingsHome, 'globalStorage', 'agent-host.db').fsPath,
 		));

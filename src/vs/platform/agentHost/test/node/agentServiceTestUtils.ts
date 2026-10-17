@@ -33,7 +33,6 @@ import { AgentHostFileMonitorService, IAgentHostFileMonitorService } from '../..
 import { IAgentHostProxyResolver } from '../../node/agentHostProxyResolver.js';
 import { AgentService } from '../../node/agentService.js';
 import { IAgentSdkDownloader } from '../../node/agentSdkDownloader.js';
-import { IClaudeAgentSdkService } from '../../node/claude/claudeAgentSdkService.js';
 import type { IAgentHostCatalogReconciliationOptions } from '../../node/agentHostCatalogReconciliationService.js';
 import { createAgentServiceComposition, type IAgentServiceComposition } from '../../node/agentServiceComposition.js';
 import { activateAgentHostContributions } from '../../node/agentHostContributions.js';
@@ -210,7 +209,6 @@ export function createTestAgentService(
 	catalogReconciliationOptions?: IAgentHostCatalogReconciliationOptions,
 	startupPerformance?: IAgentHostStartupPerformance,
 	initialTitleGenerationStrategy: AutomaticTitleGenerationStrategy = 'utility',
-	claudeSdkService?: IClaudeAgentSdkService,
 ): AgentService {
 	const effectiveFileMonitorService = fileMonitorService ?? new AgentHostFileMonitorService(fileService, logService);
 	const clientConnectionService = new AgentHostClientConnectionService();
@@ -260,7 +258,6 @@ export function createTestAgentService(
 	});
 	services.set(IAgentHostFileMonitorService, effectiveFileMonitorService);
 	services.set(IAgentSdkDownloader, new class extends mock<IAgentSdkDownloader>() { }());
-	services.set(IClaudeAgentSdkService, claudeSdkService ?? new class extends mock<IClaudeAgentSdkService>() { }());
 	services.set(IAgentEditAttributionService, new NullAgentEditAttributionService());
 	services.set(IAgentHostOTelService, NullAgentHostOTelService);
 	// Automation startup cleanup touches the plugin directory, so back it with a provider even when callers pass a bare file service.

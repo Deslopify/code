@@ -15,7 +15,6 @@ import type { CCAModel } from '@vscode/copilot-api';
 import type { Database } from '@vscode/sqlite3';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
 import { DeferredPromise, disposableTimeout, raceTimeout, retry, timeout } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { CancellationError } from '../../../../base/common/errors.js';
@@ -42,7 +41,7 @@ import { chatCatalogV2ToCatalogChats } from '../../node/agentHostCatalogSourceRe
 import { getTelemetryMigrationSessionId } from '../../common/agentTelemetryCorrelation.js';
 import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
-import { AgentChatMigrationDeferred, AgentSession, type AgentChatMigrationResult, AgentWorkingDirectoryChangedError, GITHUB_COPILOT_PROTECTED_RESOURCE, GITHUB_REPO_PROTECTED_RESOURCE, SubagentChatSignal, resolveAgentChatContext, resolveAgentChatOrigin, type IAgent, type IAgentChatAdoptionResult, type IAgentChatContext, type IAgentChatDataChange, type IAgentChatMetadata, type IAgentChatMetadataOptions, type IAgentChats, type IAgentCreateChatForkSource, type IAgentCreateChatOptions, type IAgentCreateChatResult, type IAgentCreateSessionConfig, type IAgentCreateSessionResult, type IAgentDescriptor, type IAgentDiscoveredChat, type IAgentListedChat, type IAgentLegacyChat, type IAgentMaterializeChatEvent, type IAgentSessionMetadata, type IAgentSpawnChatEvent, fixedChatOwnerRef } from '../../common/agent.js';
+import { AgentChatMigrationDeferred, AgentSession, type AgentChatMigrationResult, AgentWorkingDirectoryChangedError, GITHUB_COPILOT_PROTECTED_RESOURCE, GITHUB_REPO_PROTECTED_RESOURCE, SubagentChatSignal, resolveAgentChatContext, type IAgent, type IAgentChatAdoptionResult, type IAgentChatContext, type IAgentChatDataChange, type IAgentChatMetadata, type IAgentChatMetadataOptions, type IAgentChats, type IAgentCreateChatForkSource, type IAgentCreateChatOptions, type IAgentCreateChatResult, type IAgentCreateSessionConfig, type IAgentCreateSessionResult, type IAgentDescriptor, type IAgentDiscoveredChat, type IAgentListedChat, type IAgentLegacyChat, type IAgentMaterializeChatEvent, type IAgentSessionMetadata, type IAgentSpawnChatEvent, fixedChatOwnerRef } from '../../common/agent.js';
 import { AgentHostPrewarmSessionsSettingId, IConnectionTrackerService } from '../../common/agentService.js';
 import { AgentHostClientType } from '../../common/agentHostClientInfo.js';
 import { AgentHostActiveAgentTitleGenerationConfigKey, platformRootSchema, platformSessionSchema, AgentHostDeferredTitleGenerationConfigKey, AgentHostTitleGenerationConfigKey, AgentHostAutoArchiveMergedSessionsAfterDaysConfigKey, AgentHostAutoDeleteArchivedMergedSessionsAfterDaysConfigKey, AgentHostArtifactToolsConfigKey, AgentHostAutoAttachPullRequestsConfigKey, AgentHostCanvasesEnabledConfigKey, AgentHostExternalSessionsMode, AgentHostMigrateLegacyCopilotCliEnabledConfigKey, AgentHostPrewarmSessionsConfigKey, AgentHostShowExternalSessionsConfigKey, AgentHostWorkspaceTrustConfigKey } from '../../common/agentHostSchema.js';
@@ -63,10 +62,8 @@ import { IAgentHostGitStateService, META_GITHUB_DATA_STATE, META_GITHUB_STATE, M
 import { getChatChangesSummaryMetadataKey, META_CHANGES_SUMMARY } from '../../common/agentHostChangesetService.js';
 import { GitRefType, META_DIFF_BASE_BRANCH, type Branch, type IAgentHostGitService } from '../../common/agentHostGitService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
-import { readSessionSandboxPolicy } from '../../common/meta/agentSandboxPolicyMeta.js';
 import { readChatUsage } from '../../common/meta/agentUsageMeta.js';
 import { getSessionSandboxConfig } from '../../node/sessionSandbox.js';
-import { buildSandboxConfigForSdk } from '../../node/copilot/sandboxConfigForSdk.js';
 import { AgentMergeConfigKey, readAgentMergeSessionState } from '../../common/agentMerge.js';
 import { SessionDatabase, sessionDatabaseMigrations } from '../../node/sessionDatabase.js';
 import { ActionType, ActionEnvelope, NotificationType, type ChatAction, type ChatConfigChangedAction, type INotification, type SessionAction, type SessionSummaryChanges } from '../../common/state/sessionActions.js';
@@ -98,8 +95,6 @@ import { AgentHostAuthenticationScope } from '../../node/agentHostAuthentication
 import { SESSION_CREDENTIAL_PRINCIPAL_KEY } from '../../node/agentHostAuthenticationService.js';
 import type { IAgentHostClientConnectionService } from '../../node/agentHostClientConnectionService.js';
 import { readChatInputState } from '../../common/meta/agentHostChatInputState.js';
-import { buildSubagentTurnsFromHistory, buildTurnsFromHistory, mapSessionEventsToHistoryRecords, type IHistoryRecord } from './historyRecordFixtures.js';
-import { type ISessionEvent } from './copilotTestEvents.js';
 import { createNoopGitService, createNullSessionDataService, createSessionDataService, TestSessionDatabase } from '../common/sessionTestHelpers.js';
 import { mintedTestChatOwner, isMintedTestDefaultChat } from '../common/mintedChatUri.js';
 import { findTestCatalogPayloadChatOwners, findTestCentralChatOwners, listTestLegacyChatCatalogSessions, readTestChatV2, readTestSessionListCatalogs, readTestSessionRegistrations, SessionStateUnsupportedDatabase, testRegistrationGeneration, seedSessionAdditionalWorktrees, createTestSessionStateStore, disposeTestSessionStateDatabases } from './chatMetadataTestHelpers.js';
@@ -356,30 +351,6 @@ function matchesExclusionExpectation(
 async function createProvisionalChat(base: IAgentChats, chat: URI, context: URI | IAgentChatContext, options?: IAgentCreateChatOptions): Promise<IAgentCreateChatResult | void> {
 	const result = await base.createChat(chat, context, options);
 	return result ? { ...result, provisional: true } : result;
-}
-
-/**
- * Loads a JSONL fixture of raw Copilot SDK events, runs them through
- * {@link mapSessionEventsToHistoryRecords}, and returns the result
- * suitable for setting on {@link MockAgent.sessionMessages}. Tests the
- * full pipeline: SDK events → IHistoryRecord → buildTurnsFromHistory →
- * Turn[].
- *
- * Fixture files live in `test-cases/` and are sanitized copies of real
- * `events.jsonl` files from `~/.copilot/session-state/`.
- */
-async function loadFixtureMessages(fixtureName: string, session: URI) {
-	// Resolve the fixture from the source tree (test-cases/ is not compiled to out/)
-	const thisFile = fileURLToPath(import.meta.url);
-	// Navigate from out/vs/... to src/vs/... by replacing the out/ prefix.
-	// Use a regex that handles both / and \ separators for Windows compat.
-	const srcFile = thisFile.replace(/[/\\]out[/\\]/, (m) => m.replace('out', 'src'));
-	const lastSep = Math.max(srcFile.lastIndexOf('/'), srcFile.lastIndexOf('\\'));
-	const fixtureDir = srcFile.substring(0, lastSep);
-	const sep = srcFile.includes('\\') ? '\\' : '/';
-	const raw = readFileSync(`${fixtureDir}${sep}test-cases${sep}${fixtureName}`, 'utf-8');
-	const events: ISessionEvent[] = raw.trim().split('\n').map(line => JSON.parse(line));
-	return mapSessionEventsToHistoryRecords(session, undefined, events);
 }
 
 class TestCopilotApiService implements ICopilotApiService {
@@ -26362,50 +26333,6 @@ suite('AgentService (node dispatcher)', () => {
 			assert.ok(mdParts.some(p => p.content.includes('3 issues')), 'Should have the final markdown response');
 		});
 
-		test('inner assistant messages from subagent do not create extra turns (fixture)', async () => {
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			const sessions = await copilotAgent.listSessions();
-			const sessionResource = sessions[0].session;
-
-			// Load real SDK events from fixture (sanitized from ~/.copilot/session-state/)
-			copilotAgent.sessionMessages = await loadFixtureMessages('subagent-session.jsonl', session);
-
-			await service.restoreSession(sessionResource);
-
-			const state = getStateManager(service).getSessionState(sessionResource.toString());
-			assert.ok(state);
-			assert.strictEqual(state!.turns.length, 1, `Expected 1 turn but got ${state!.turns.length}: ${state!.turns.map(t => `"${t.message.text.substring(0, 40)}"`).join(', ')}`);
-			assert.strictEqual(state!.turns[0].message.text, 'Run a sync subagent to do some searches, just testing subagent rendering');
-			assert.strictEqual(state!.turns[0].state, TurnState.Complete);
-
-			// Should have the parent subagent tool call with subagent content
-			const toolCallParts = state!.turns[0].responseParts.filter((p): p is ToolCallResponsePart => p.kind === ResponsePartKind.ToolCall);
-			const parentTc = toolCallParts.find(p => p.toolCall.toolName === 'task');
-			assert.ok(parentTc, 'Should have a task tool call');
-			assert.strictEqual(parentTc!.toolCall._meta?.toolKind, 'subagent');
-
-			// Inner tool calls should NOT be in the parent turn — they belong
-			// to the child subagent session.
-			const parentToolCallId = parentTc!.toolCall.toolCallId;
-			const nonParentTools = toolCallParts.filter(p => p.toolCall.toolCallId !== parentToolCallId);
-			assert.strictEqual(nonParentTools.length, 0, `Parent turn should only contain the task tool call, but found ${nonParentTools.length} extra tool calls`);
-
-			// Subscribe to the child subagent session and verify inner tools
-			const childSessionUri = buildSubagentSessionUri(sessionResource.toString(), parentToolCallId);
-			const snapshot = await service.subscribe(URI.parse(childSessionUri), 'client-test');
-			assert.ok(snapshot?.state, 'Child session snapshot should exist');
-			const childState = getStateManager(service).getSessionState(childSessionUri);
-			assert.ok(childState, 'Child session state should exist');
-			assert.strictEqual(childState!.turns.length, 1, 'Child session should have 1 turn');
-			const childToolParts = childState!.turns[0].responseParts.filter((p): p is ToolCallResponsePart => p.kind === ResponsePartKind.ToolCall);
-			assert.ok(childToolParts.length > 0, `Child session should have inner tool calls but got ${childToolParts.length}`);
-
-			// Should have the final markdown
-			const mdParts = state!.turns[0].responseParts.filter((p): p is MarkdownResponsePart => p.kind === ResponsePartKind.Markdown);
-			assert.ok(mdParts.length > 0, 'Should have markdown content');
-		});
-
 		test('registers subagent summaries without loading child transcripts until subscription', async () => {
 			class LazySubagentMockAgent extends MockAgent {
 				readonly messageReads: string[] = [];
@@ -27634,78 +27561,6 @@ suite('AgentService (node dispatcher)', () => {
 			assert.strictEqual(getStateManager(localService).getSessionState(parent.toString())?.chats.find(chat => chat.resource === childChat)?.title, 'Persisted Worker');
 		});
 
-		function subagentHistory(session: URI): IHistoryRecord[] {
-			return [
-				{ type: 'message', session, role: 'user', messageId: 'msg-1', content: 'Review this code', toolRequests: [] },
-				{ type: 'message', session, role: 'assistant', messageId: 'msg-2', content: '', toolRequests: [{ toolCallId: 'tc-sub', name: 'task' }] },
-				{ type: 'tool_start', session, toolCallId: 'tc-sub', toolName: 'task', displayName: 'Task', invocationMessage: 'Delegating...', toolKind: 'subagent' as const, subagentDescription: 'Find related files', subagentAgentName: 'explore' },
-				{ type: 'subagent_started', session, toolCallId: 'tc-sub', agentName: 'explore', agentDisplayName: 'Explore', agentDescription: 'Explores the codebase' },
-				{ type: 'tool_start', session, toolCallId: 'tc-inner', toolName: 'bash', displayName: 'Bash', invocationMessage: 'Running ls...', parentToolCallId: 'tc-sub' },
-				{ type: 'tool_complete', session, toolCallId: 'tc-inner', result: { success: true, pastTenseMessage: 'Ran ls', content: [{ type: ToolResultContentType.Text, text: 'file1.ts' }] }, parentToolCallId: 'tc-sub' },
-				{ type: 'tool_complete', session, toolCallId: 'tc-sub', result: { success: true, pastTenseMessage: 'Delegated task', content: [{ type: ToolResultContentType.Text, text: 'Found files' }] } },
-			];
-		}
-
-		test('subscribing to a canonical subagent chat of a restored parent reconstructs it on demand', async () => {
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			const parent = session.toString();
-			copilotAgent.sessionMessages = subagentHistory(session);
-			await service.restoreSession(session);
-
-			const chatUri = buildSubagentChatUri(parent, 'tc-sub');
-			const snapshot = await service.subscribe(URI.parse(chatUri), 'client-restored-subagent');
-
-			assert.deepStrictEqual({
-				resource: snapshot.resource,
-				turnCount: getStateManager(service).getChatState(chatUri)?.turns.length,
-				origin: getStateManager(service).getChatState(chatUri)?.origin,
-				owner: getStateManager(service).getChatOwner(chatUri),
-				legacySessionExists: !!getStateManager(service).getSessionState(buildSubagentSessionUri(parent, 'tc-sub')),
-			}, {
-				resource: chatUri,
-				turnCount: 1,
-				origin: { kind: ChatOriginKind.Tool, chat: buildDefaultChatUri(parent), toolCallId: 'tc-sub' },
-				owner: parent,
-				legacySessionExists: false,
-			});
-		});
-
-		test('subscribing to a canonical subagent chat waits for its parent restore already in flight', async () => {
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			const parent = session.toString();
-			copilotAgent.sessionMessages = subagentHistory(session);
-			const chatUri = buildSubagentChatUri(parent, 'tc-sub');
-
-			const restoring = service.restoreSession(session);
-			const snapshot = await service.subscribe(URI.parse(chatUri), 'client-concurrent-subagent');
-			await restoring;
-
-			assert.deepStrictEqual({
-				resource: snapshot.resource,
-				turnCount: getStateManager(service).getChatState(chatUri)?.turns.length,
-				owner: getStateManager(service).getChatOwner(chatUri),
-			}, {
-				resource: chatUri,
-				turnCount: 1,
-				owner: parent,
-			});
-		});
-
-		test('subscribing to a canonical subagent chat with no recorded owner and no restore in flight is not found', async () => {
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			copilotAgent.sessionMessages = subagentHistory(session);
-			const chatUri = buildSubagentChatUri(session.toString(), 'tc-sub');
-
-			await assert.rejects(service.subscribe(URI.parse(chatUri), 'client-unknown-subagent'), /Cannot subscribe to unknown resource/);
-			assert.deepStrictEqual({
-				parentRestored: !!getStateManager(service).getSessionState(session.toString()),
-				owner: getStateManager(service).getChatOwner(chatUri),
-			}, { parentRestored: false, owner: undefined });
-		});
-
 		test('a restored subagent identifies the peer chat that actually spawned it', async () => {
 			registerTestAgentProvider(service, copilotAgent);
 			const { session } = await createAgentSession(copilotAgent);
@@ -27746,67 +27601,6 @@ suite('AgentService (node dispatcher)', () => {
 			assert.deepStrictEqual({ origin: chatState?.origin, title: chatState?.title }, {
 				origin: { kind: ChatOriginKind.Tool, chat: peerChat, toolCallId: 'tc-sub' },
 				title: 'Find related files',
-			});
-		});
-
-		test('a subagent spawned by an unhydrated peer chat is not found when each chat has its own transcript', async () => {
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			const sessionResource = (await copilotAgent.listSessions())[0].session;
-			const parent = sessionResource.toString();
-			const defaultChat = buildDefaultChatUri(parent);
-			const peerChat = buildChatUri(parent, 'peer-spawner');
-			const chatUri = buildSubagentChatUri(parent, 'tc-sub');
-			// Real providers keep each chat's transcript in its own backing: the
-			// spawning tool call and the subagent's inner events live only in the
-			// peer chat's transcript, never in the default chat's.
-			const peerTranscript: IHistoryRecord[] = [
-				{ type: 'message', session, role: 'user', messageId: 'peer-1', content: 'delegate', toolRequests: [] },
-				{ type: 'message', session, role: 'assistant', messageId: 'peer-2', content: '', toolRequests: [{ toolCallId: 'tc-sub', name: 'task' }] },
-				{ type: 'tool_start', session, toolCallId: 'tc-sub', toolName: 'task', displayName: 'Task', invocationMessage: 'Delegating...', toolKind: 'subagent' as const, subagentDescription: 'Find related files', subagentAgentName: 'explore' },
-				{ type: 'subagent_started', session, toolCallId: 'tc-sub', agentName: 'explore', agentDisplayName: 'Explore', agentDescription: 'Explores the codebase' },
-				{ type: 'tool_start', session, toolCallId: 'tc-inner', toolName: 'bash', displayName: 'Bash', invocationMessage: 'Running ls...', parentToolCallId: 'tc-sub' },
-				{ type: 'tool_complete', session, toolCallId: 'tc-inner', result: { success: true, pastTenseMessage: 'Ran ls' }, parentToolCallId: 'tc-sub' },
-				{ type: 'tool_complete', session, toolCallId: 'tc-sub', result: { success: true, pastTenseMessage: 'Delegated', content: [] } },
-			];
-			const defaultTranscript: IHistoryRecord[] = [
-				{ type: 'message', session, role: 'user', messageId: 'msg-1', content: 'main chat', toolRequests: [] },
-			];
-			const requested: string[] = [];
-			copilotAgent.chats.getMessages = async (chat, context) => {
-				const origin = resolveAgentChatOrigin(context);
-				requested.push(`${chat.toString()}<-${origin?.kind === ChatOriginKind.Tool ? origin.chat : ''}`);
-				if (chat.toString() === defaultChat) {
-					return buildTurnsFromHistory(defaultTranscript);
-				}
-				if (chat.toString() === peerChat) {
-					return buildTurnsFromHistory(peerTranscript);
-				}
-				if (origin?.kind === ChatOriginKind.Tool && origin.chat === peerChat) {
-					return buildSubagentTurnsFromHistory(peerTranscript, origin.toolCallId, chat.toString());
-				}
-				return [];
-			};
-			await service.restoreSession(sessionResource);
-			let peerResolved = false;
-			getStateManager(service).registerRestoredChatSummary(parent, peerChat, {
-				storageResource: creationTimeChatStorageResource(parent, peerChat, buildDefaultChatUri(parent)),
-				title: 'Peer',
-				resolver: async () => {
-					peerResolved = true;
-					return { turns: [...buildTurnsFromHistory(peerTranscript)] };
-				},
-			});
-
-			await assert.rejects(service.subscribe(URI.parse(chatUri), 'client-unhydrated-peer-spawned-subagent'), /Cannot subscribe to unknown resource/);
-			assert.deepStrictEqual({
-				chat: getStateManager(service).getChatState(chatUri),
-				peerResolved,
-				subagentTranscriptFromPeer: requested.includes(`${chatUri}<-${peerChat}`),
-			}, {
-				chat: undefined,
-				peerResolved: false,
-				subagentTranscriptFromPeer: false,
 			});
 		});
 
@@ -28198,61 +27992,6 @@ suite('AgentService (node dispatcher)', () => {
 				resource: child,
 				origin: { kind: ChatOriginKind.Tool, chat: defaultChat, toolCallId: 'tc-sub' },
 			});
-		});
-
-		test('inner assistant messages from subagent route via envelope agentId (fixture)', async () => {
-			// Regression for the SDK migration away from the deprecated
-			// `data.parentToolCallId` to the envelope-level `agentId`. Newer
-			// session logs only tag subagent events with `agentId`, so the
-			// reopen/replay path must resolve those back to the parent tool
-			// call id — otherwise the subagent's assistant messages leak into
-			// the main session as extra turns.
-			registerTestAgentProvider(service, copilotAgent);
-			const { session } = await createAgentSession(copilotAgent);
-			const sessions = await copilotAgent.listSessions();
-			const sessionResource = sessions[0].session;
-
-			copilotAgent.sessionMessages = await loadFixtureMessages('subagent-session-agentid.jsonl', session);
-
-			await service.restoreSession(sessionResource);
-
-			const state = getStateManager(service).getSessionState(sessionResource.toString());
-			assert.ok(state);
-			assert.strictEqual(state!.turns.length, 1, `Expected 1 turn but got ${state!.turns.length}: ${state!.turns.map(t => `"${t.message.text.substring(0, 40)}"`).join(', ')}`);
-			assert.strictEqual(state!.turns[0].message.text, 'Run a sync subagent to do some searches, just testing subagent rendering');
-			assert.strictEqual(state!.turns[0].state, TurnState.Complete);
-
-			// Should have the parent subagent tool call with subagent content.
-			const toolCallParts = state!.turns[0].responseParts.filter((p): p is ToolCallResponsePart => p.kind === ResponsePartKind.ToolCall);
-			const parentTc = toolCallParts.find(p => p.toolCall.toolName === 'task');
-			assert.ok(parentTc, 'Should have a task tool call');
-			assert.strictEqual(parentTc!.toolCall._meta?.toolKind, 'subagent');
-
-			// Inner tool calls should NOT be in the parent turn — they belong
-			// to the child subagent session.
-			const parentToolCallId = parentTc!.toolCall.toolCallId;
-			const nonParentTools = toolCallParts.filter(p => p.toolCall.toolCallId !== parentToolCallId);
-			assert.strictEqual(nonParentTools.length, 0, `Parent turn should only contain the task tool call, but found ${nonParentTools.length} extra tool calls`);
-
-			// The subagent's inner assistant message must not surface in the
-			// parent transcript.
-			const mdParts = state!.turns[0].responseParts.filter((p): p is MarkdownResponsePart => p.kind === ResponsePartKind.Markdown);
-			assert.ok(
-				mdParts.every(p => !p.content.startsWith('Perfect! I now have enough information')),
-				'Subagent inner assistant message should not leak into the parent turn',
-			);
-			assert.ok(mdParts.length > 0, 'Should have markdown content');
-
-			// Subscribe to the child subagent session and verify inner tools
-			// and the subagent's assistant message landed there.
-			const childSessionUri = buildSubagentSessionUri(sessionResource.toString(), parentToolCallId);
-			const snapshot = await service.subscribe(URI.parse(childSessionUri), 'client-test');
-			assert.ok(snapshot?.state, 'Child session snapshot should exist');
-			const childState = getStateManager(service).getSessionState(childSessionUri);
-			assert.ok(childState, 'Child session state should exist');
-			assert.strictEqual(childState!.turns.length, 1, 'Child session should have 1 turn');
-			const childToolParts = childState!.turns[0].responseParts.filter((p): p is ToolCallResponsePart => p.kind === ResponsePartKind.ToolCall);
-			assert.ok(childToolParts.length > 0, `Child session should have inner tool calls but got ${childToolParts.length}`);
 		});
 
 		test('coalesces concurrent restores for the same subagent session', async () => {
@@ -37905,46 +37644,6 @@ suite('AgentService (node dispatcher)', () => {
 				restored: { sandboxEnabled: 'off', mode: 'plan' },
 				confirmed: undefined,
 				effective: 'off',
-			});
-		});
-
-		test('restoreSession replaces persisted off with applied on when current managed policy requires sandboxing', async () => {
-			const sessionDb = disposables.add(await SessionDatabase.open(':memory:'));
-			const sessionDataService = createSessionDataService(sessionDb);
-			const localAgent = new MockAgent('copilot');
-			disposables.add(toDisposable(() => localAgent.dispose()));
-			const localService = disposables.add(createTestAgentService(new NullLogService(), fileService, sessionDataService, { _serviceBrand: undefined } as IProductService, createNoopGitService()));
-			registerTestAgentProvider(localService, localAgent);
-			const configuration = getConfigurationService(localService);
-			configuration.updateRootConfig({ sandbox: { enabled: 'off' } });
-			const { session } = await createAgentSession(localAgent);
-			await sessionDb.setMetadata('configValues', JSON.stringify({ autoApprove: 'autoApprove', sandboxEnabled: 'off' }));
-			configuration.setSessionSandboxPolicy(session.toString(), { enabled: true, allowBypass: false });
-			const applied: boolean[] = [];
-			disposables.add(configuration.onDidSessionConfigChange(event => {
-				if (event.session === session.toString()) {
-					const target = { session: event.session, chat: buildDefaultChatUri(event.session) };
-					const enabled = buildSandboxConfigForSdk(process.platform, getSessionSandboxConfig(configuration, target))?.enabled ?? false;
-					applied.push(enabled);
-					configuration.setChatSandboxEnabled(target, enabled);
-				}
-			}));
-
-			await localService.restoreSession(session);
-			await timeout(50);
-			const state = getStateManager(localService).getSessionState(session.toString());
-			assert.deepStrictEqual({
-				applied,
-				config: state?.config?.values,
-				policy: readSessionSandboxPolicy(state),
-				confirmed: configuration.getSessionSandboxEnabled(session.toString()),
-				persisted: JSON.parse((await sessionDb.getMetadata('configValues'))!),
-			}, {
-				applied: [true],
-				config: { autoApprove: 'autoApprove', sandboxEnabled: 'on' },
-				policy: { enabled: true, allowBypass: false },
-				confirmed: true,
-				persisted: { autoApprove: 'autoApprove', sandboxEnabled: 'on' },
 			});
 		});
 

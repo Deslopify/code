@@ -18,7 +18,7 @@ import { IAgentHostReviewService } from '../common/agentHostReviewService.js';
 import { AgentHostLaunchKind } from '../common/agentHostTelemetry.js';
 import { AgentHostAgentOrchestrationLimitsConfigKey, platformRootSchema } from '../common/agentHostSchema.js';
 import { AH_META_AUTO_ARCHIVED_AT_DB_KEY } from '../common/state/sessionState.js';
-import { CLAUDE_AGENT_PROVIDER_ID, CODEX_AGENT_PROVIDER_ID, type AgentProvider, type IAgent } from '../common/agent.js';
+import { CODEX_AGENT_PROVIDER_ID, type AgentProvider, type IAgent } from '../common/agent.js';
 import { IAgentHostSessionStateStore } from '../common/agentHostSessionStateStore.js';
 import { ISessionDataService } from '../common/sessionDataService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
@@ -31,7 +31,6 @@ import { IAgentHostDatabase } from './agentHostDatabase.js';
 import { AgentHostLocalTurns } from './agentHostLocalTurns.js';
 import { AgentHostSavedChatService, type IAgentHostSavedChatReader } from './agentHostSavedChatService.js';
 import { AgentHostWorktreeCoOwnership } from './agentHostWorktreeCoOwnership.js';
-import { ClaudeSavedChatReader } from './claude/claudeSavedChatReader.js';
 import { CodexSavedChatReader } from './codex/codexSavedChatReader.js';
 import { AgentHostLocalCommands, IAgentHostLocalCommands } from './localCommands/localChatCommand.js';
 import { AgentHostStateManager } from './agentHostStateManager.js';
@@ -144,7 +143,6 @@ export function createAgentServiceComposition(
 			authenticationService,
 			orchestratorDatabase,
 			savedChats: new AgentHostSavedChatService(new Map<AgentProvider, IAgentHostSavedChatReader>([
-				[CLAUDE_AGENT_PROVIDER_ID, instantiationService.createInstance(ClaudeSavedChatReader)],
 				[CODEX_AGENT_PROVIDER_ID, instantiationService.createInstance(CodexSavedChatReader)],
 			]), orchestratorDatabase, sessionDataService, sessionStateStore, logService),
 			peerChatStore,

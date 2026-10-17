@@ -10,12 +10,10 @@ import { URI } from '../../../../base/common/uri.js';
 import { mock } from '../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { Client, type IIPCOptions } from '../../../../base/parts/ipc/node/ipc.cp.js';
-import { AiAgentEnvValue, AiAgentEnvVar } from '../../../chat/common/aiAgentEnv.js';
 import { TestConfigurationService } from '../../../configuration/test/common/testConfigurationService.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.js';
-import { createCopilotCliEnvironment } from '../../node/copilot/copilotCliEnvironment.js';
 import { NodeAgentHostStarter } from '../../node/nodeAgentHostStarter.js';
 import { AgentHostAhpJsonlLoggingEnvVar } from '../../common/ahpJsonlLogger.js';
 import { AgentHostAhpJsonlLoggingSettingId } from '../../common/agentService.js';
@@ -57,44 +55,6 @@ suite('NodeAgentHostStarter', () => {
 		await configuration.setUserConfiguration(AgentHostAhpJsonlLoggingSettingId, false);
 		disposables.add((await starter.start()).store);
 		assert.deepStrictEqual(starter.environments.map(env => env[AgentHostAhpJsonlLoggingEnvVar]), ['true', 'false']);
-	});
-
-	test('applies resolver overrides without replacing launcher-owned environment values', async () => {
-		const starter = createStarter();
-		starter.setWebSocketConfig({ port: '12345', connectionToken: 'launcher-connection-token' });
-		starter.setEnvironment(Object.freeze({
-			GITHUB_TOKEN: 'codespace-token',
-			GH_TOKEN: null,
-			EMPTY: '',
-			[AiAgentEnvVar]: 'resolver-agent',
-			VSCODE_ESM_ENTRYPOINT: 'resolver-entrypoint',
-			VSCODE_AGENT_HOST_CONNECTION_TOKEN: 'resolver-connection-token',
-		}));
-		disposables.add((await starter.start()).store);
-		const env = starter.environments[0];
-		const cliEnv = createCopilotCliEnvironment(env);
-
-		assert.deepStrictEqual({
-			token: env.GITHUB_TOKEN,
-			ghToken: env.GH_TOKEN,
-			empty: env.EMPTY,
-			shellOnly: env.SHELL_ONLY,
-			agent: env[AiAgentEnvVar],
-			entrypoint: env.VSCODE_ESM_ENTRYPOINT,
-			connectionToken: env.VSCODE_AGENT_HOST_CONNECTION_TOKEN,
-			cliToken: cliEnv.GITHUB_TOKEN,
-			cliGhToken: cliEnv.GH_TOKEN,
-		}, {
-			token: 'codespace-token',
-			ghToken: undefined,
-			empty: '',
-			shellOnly: 'shell-value',
-			agent: AiAgentEnvValue,
-			entrypoint: 'vs/platform/agentHost/node/agentHostMain',
-			connectionToken: 'launcher-connection-token',
-			cliToken: 'codespace-token',
-			cliGhToken: undefined,
-		});
 	});
 
 	test('retains an environment snapshot for restarts and replaces it on re-resolution', async () => {
