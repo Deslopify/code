@@ -34,8 +34,6 @@ import { AgentHostGitService } from './agentHostGitService.js';
 import { AgentPluginManager } from './agentPluginManager.js';
 import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js';
 import { IByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
-import { ByokLmProxyService, IByokLmProxyService, NullByokLmProxyService } from './copilot/byokLmProxyService.js';
-import { ILocalModelSetupService, LocalModelSetupService, NullLocalModelSetupService } from './copilot/localModelBridge/localModelSetupService.js';
 import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService.js';
 import { NodeWorkerDiffComputeService } from './diffComputeService.js';
 import { NetworkDiagnosticsService, INetworkDiagnosticsService } from './networkDiagnosticsService.js';
@@ -158,12 +156,4 @@ export function registerAgentHostHostServices(services: ServiceCollection, input
 	services.set(ICodexProxyService, new SyncDescriptor(CodexProxyService, [undefined]));
 	services.set(IAgentHostOTelService, new SyncDescriptor(AgentHostOTelService, [{ fetchFn: inputs.fetchFn }]));
 	services.set(IAgentHostUtilityModelService, new SyncDescriptor(AgentHostUtilityModelService, [inputs.byok.kind === 'renderer']));
-	services.set(
-		IByokLmProxyService,
-		inputs.byok.kind === 'renderer' ? new SyncDescriptor(ByokLmProxyService) : new NullByokLmProxyService(),
-	);
-	services.set(
-		ILocalModelSetupService,
-		inputs.localModel?.kind === 'localUtilityProcess' ? new SyncDescriptor(LocalModelSetupService) : new NullLocalModelSetupService(),
-	);
 }
