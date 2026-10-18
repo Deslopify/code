@@ -37,7 +37,8 @@ import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { IAgentHostCustomizationEnablementService } from './agentHostCustomizationEnablementService.js';
 import { IAgentHostStateManager } from './agentHostStateManager.js';
 import { BANG_COMMAND_PREFIX } from './agentHostBangCommand.js';
-import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
+import { CodexAgent } from './codex/codexAgent.js';
+import { CodexSdkPackage } from './codex/codexSdk.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostProviderService } from './agentHostProviderService.js';
@@ -308,7 +309,7 @@ async function main(): Promise<void> {
 		connectionTokenValidate: options.connectionToken
 			? token => token === options.connectionToken
 			: undefined,
-	}, logService, { instantiationService, logsHome: environmentService.logsHome }));
+	}, logService));
 
 
 	const clientFileSystemProvider = disposables.add(new AgentHostClientFileSystemProvider());

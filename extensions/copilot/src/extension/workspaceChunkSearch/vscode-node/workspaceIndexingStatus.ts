@@ -8,41 +8,13 @@ import * as vscode from 'vscode';
 import { ResolvedRepoRemoteInfo } from '../../../platform/git/common/gitService';
 import { ILogService } from '../../../platform/log/common/logService';
 import { ICodeSearchAuthenticationService } from '../../../platform/remoteCodeSearch/node/codeSearchRepoAuth';
-import { WorkspaceIndexState } from '../../../platform/workspaceChunkSearch/node/workspaceChunkSearchService';
 import { coalesce } from '../../../util/vs/base/common/arrays';
-import { Emitter, Event } from '../../../util/vs/base/common/event';
 import { Disposable, DisposableStore, IDisposable } from '../../../util/vs/base/common/lifecycle';
 
 
 const reauthenticateCommandId = '_copilot.workspaceIndex.signInAgain';
 
 const codebaseSemanticSearchDocsLink = 'https://aka.ms/vscode-copilot-workspace-remote-index';
-
-interface WorkspaceIndexStateReporter {
-	readonly onDidChangeIndexState: Event<void>;
-}
-
-export class MockWorkspaceIndexStateReporter extends Disposable implements WorkspaceIndexStateReporter {
-	private _indexState: WorkspaceIndexState;
-
-	private readonly _onDidChangeIndexState = this._register(new Emitter<void>());
-	public readonly onDidChangeIndexState = this._onDidChangeIndexState.event;
-
-	constructor(initialState: WorkspaceIndexState) {
-		super();
-
-		this._indexState = initialState;
-	}
-
-	async getIndexState(): Promise<WorkspaceIndexState> {
-		return this._indexState;
-	}
-
-	updateIndexState(newState: WorkspaceIndexState): void {
-		this._indexState = newState;
-		this._onDidChangeIndexState.fire();
-	}
-}
 
 interface ChatStatusItemState {
 	readonly primary: {
@@ -134,4 +106,3 @@ export class ChatStatusWorkspaceIndexingStatus extends Disposable {
 		return disposables;
 	}
 }
-
