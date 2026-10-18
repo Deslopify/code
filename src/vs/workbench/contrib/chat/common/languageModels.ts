@@ -1704,6 +1704,10 @@ export class LanguageModelsService implements ILanguageModelsService {
 
 		this._providers.set(vendor, provider);
 
+		if (this._languageModelsConfigurationService.getLanguageModelsProviderGroups().some(group => group.vendor === vendor)) {
+			this._resolveAllLanguageModels(vendor, true).catch(error => this._logService.error(error));
+		}
+
 		const modelChangeListener = provider.onDidChange(() => {
 			this._resolveAllLanguageModels(vendor, true);
 		});

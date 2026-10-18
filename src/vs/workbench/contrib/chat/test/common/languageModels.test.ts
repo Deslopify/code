@@ -2033,6 +2033,93 @@ suite('LanguageModels - Per-Model Configuration with multiple same-vendor groups
 	});
 });
 
+suite('LanguageModels - Late Provider Registration', function () {
+
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('a provider that registers after its groups are configured resolves them without a model selection', async function () {
+		const languageModelsService = disposables.add(new LanguageModelsService(
+			new class extends mock<IExtensionService>() {
+				override activateByEvent() {
+					return Promise.resolve();
+				}
+			},
+			new NullLogService(),
+			disposables.add(new TestStorageService()),
+			disposables.add(new MockContextKeyService()),
+			new class extends mock<ILanguageModelsConfigurationService>() {
+				override onDidChangeLanguageModelGroups = Event.None;
+				override getLanguageModelsProviderGroups() {
+					return [
+						{ vendor: 'customendpoint', name: 'DeepSeek' },
+						{ vendor: 'customendpoint', name: 'MyCustom' }
+					];
+				}
+			},
+			new class extends mock<IQuickInputService>() { },
+			disposables.add(new TestSecretStorageService()),
+			new class extends mock<IProductService>() { override readonly version = '1.100.0'; },
+			new class extends mock<IRequestService>() { },
+			new TestNotificationService(),
+			NullOpenerService,
+			NullTelemetryService,
+			new TestUserDataProfileService(),
+		));
+
+		languageModelsService.deltaLanguageModelChatProviderDescriptors([
+			{
+				vendor: 'customendpoint',
+				displayName: 'Custom Endpoint',
+				configuration: { type: 'object', properties: {} } as unknown as undefined,
+				managementCommand: undefined,
+				when: undefined
+			}
+		], []);
+
+		assert.deepStrictEqual(languageModelsService.getLanguageModelGroups('customendpoint'), []);
+
+		const makeModel = (group: string, id: string): ILanguageModelChatMetadataAndIdentifier => ({
+			metadata: {
+				extension: nullExtensionDescription.identifier,
+				name: id,
+				vendor: 'customendpoint',
+				family: id,
+				version: '1.0',
+				id,
+				maxInputTokens: 100,
+				maxOutputTokens: 100,
+				isDefaultForLocation: {}
+			} satisfies ILanguageModelChatMetadata,
+			identifier: `customendpoint/${group}/${id}`,
+		});
+
+		const modelsChanged = new Promise<string>(resolve => disposables.add(languageModelsService.onDidChangeLanguageModels(resolve)));
+		disposables.add(languageModelsService.registerLanguageModelProvider('customendpoint', {
+			onDidChange: Event.None,
+			provideLanguageModelChatInfo: async options => {
+				if (options.group === 'DeepSeek') {
+					return [makeModel('DeepSeek', 'deepseek-v4-pro')];
+				}
+				if (options.group === 'MyCustom') {
+					return [makeModel('MyCustom', 'gpt-5.5')];
+				}
+				return [];
+			},
+			sendChatRequest: async () => { throw new Error(); },
+			provideTokenCount: async () => { throw new Error(); }
+		}));
+
+		assert.strictEqual(await modelsChanged, 'customendpoint');
+		assert.deepStrictEqual(
+			languageModelsService.getLanguageModelGroups('customendpoint').map(group => ({ name: group.group?.name, modelIdentifiers: group.modelIdentifiers })),
+			[
+				{ name: 'DeepSeek', modelIdentifiers: ['customendpoint/DeepSeek/deepseek-v4-pro'] },
+				{ name: 'MyCustom', modelIdentifiers: ['customendpoint/MyCustom/gpt-5.5'] }
+			]
+		);
+	});
+});
+
 suite('LanguageModels - Duplicate configuration-only groups', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 	const vendor = 'agent-host-copilotcli';
