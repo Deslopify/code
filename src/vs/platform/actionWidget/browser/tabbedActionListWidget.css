@@ -148,6 +148,54 @@
 	flex: 0 0 auto;
 }
 
+.action-widget .tabbed-action-list-tabstrip.scrollable {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	min-width: 0;
+	gap: var(--vscode-spacing-size20);
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	overscroll-behavior-x: contain;
+	-ms-overflow-style: none;
+}
+
+.action-widget .tabbed-action-list-tabstrip.scrollable::-webkit-scrollbar {
+	display: none;
+}
+
+.action-widget .tabbed-action-list-tabstrip.scrollable > * {
+	flex: 0 0 auto;
+}
+
+.action-widget .tabbed-action-list-tabstrip.scrollable.scroll-left {
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--vscode-spacing-size60, 60px));
+	mask-image: linear-gradient(to right, transparent 0, #000 var(--vscode-spacing-size60, 60px));
+}
+
+.action-widget .tabbed-action-list-tabstrip.scrollable.scroll-right {
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--vscode-spacing-size60, 60px)), transparent 100%);
+	mask-image: linear-gradient(to right, #000 calc(100% - var(--vscode-spacing-size60, 60px)), transparent 100%);
+}
+
+.action-widget .tabbed-action-list-tabstrip.scrollable.scroll-left.scroll-right {
+	-webkit-mask-image: linear-gradient(
+		to right,
+		transparent 0,
+		#000 var(--vscode-spacing-size60, 60px),
+		#000 calc(100% - var(--vscode-spacing-size60, 60px)),
+		transparent 100%
+	);
+	mask-image: linear-gradient(
+		to right,
+		transparent 0,
+		#000 var(--vscode-spacing-size60, 60px),
+		#000 calc(100% - var(--vscode-spacing-size60, 60px)),
+		transparent 100%
+	);
+}
+
 .action-widget.showing-details {
 	position: relative;
 }

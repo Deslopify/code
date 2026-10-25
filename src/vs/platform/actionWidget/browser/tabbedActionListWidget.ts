@@ -205,6 +205,11 @@ export interface ITabbedActionListShowOptions<T> {
 	 * Returns false when the item has no details.
 	 */
 	openItemDetails?(item: IActionListItem<T>): boolean;
+	/**
+	 * Adds edge fades and smooth wheel scrolling to the tab strip when its tabs
+	 * overflow horizontally. Reattached on every render, including tab swaps.
+	 */
+	readonly enableTabStripScrollAffordance?: boolean;
 }
 
 export interface ITabbedActionListRefreshOptions extends IActionListUpdateOptions {
@@ -368,6 +373,9 @@ export class TabbedActionListWidget extends Disposable {
 				// A consumer showing a filter hides the strip and takes its place, so the
 				// trailing actions never move.
 				const tabStrip = dom.append(tabBar, dom.$('.tabbed-action-list-tabstrip'));
+				if (options.enableTabStripScrollAffordance) {
+					renderDisposables.add(this._attachTabStripScrollAffordance(tabStrip));
+				}
 				const filterSlot = dom.append(tabBar, dom.$('.tabbed-action-list-filter-slot'));
 
 				const activateTab = (next: string) => {
@@ -1136,6 +1144,120 @@ export class TabbedActionListWidget extends Disposable {
 			dom.isHTMLElement(child) && !child.classList.contains('codicon'));
 		labelSpan?.animate([{ maxWidth: `${labelSpan.scrollWidth}px` }, { maxWidth: '0px' }], TAB_RESIZE_ANIMATION);
 		animation.finished.then(() => store.dispose(), () => { });
+		return store;
+	}
+
+	/**
+	 * Adds edge fades and smooth wheel scrolling to the tab strip when its tabs
+	 * overflow horizontally. Returns a disposable that removes the behavior.
+	 */
+	private _attachTabStripScrollAffordance(strip: HTMLElement): IDisposable {
+		const store = new DisposableStore();
+		strip.classList.add('scrollable');
+		store.add(toDisposable(() => strip.classList.remove('scrollable')));
+		const targetWindow = dom.getWindow(strip);
+		const EDGE_EPSILON = 1;
+		const SNAP_EPSILON = 1;
+		let isRTL = false;
+		const getScrollBounds = () => {
+			const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+			return isRTL
+				? { min: -maxScroll, max: 0, maxScroll }
+				: { min: 0, max: maxScroll, maxScroll };
+		};
+		const update = () => {
+			const { min, max } = getScrollBounds();
+			strip.classList.toggle('scroll-left', strip.scrollLeft > min + EDGE_EPSILON);
+			strip.classList.toggle('scroll-right', strip.scrollLeft < max - EDGE_EPSILON);
+		};
+		const refreshDirection = () => {
+			isRTL = targetWindow.getComputedStyle(strip).direction === 'rtl';
+		};
+		const onLayoutChange = () => {
+			refreshDirection();
+			update();
+		};
+		store.add(dom.addDisposableListener(strip, dom.EventType.SCROLL, update));
+		let targetScrollLeft = 0;
+		let animationFrame = 0;
+		let lastFrameTime = 0;
+		const stopAnimation = () => {
+			if (animationFrame) {
+				targetWindow.cancelAnimationFrame(animationFrame);
+				animationFrame = 0;
+			}
+			lastFrameTime = 0;
+		};
+		const step = (time: number) => {
+			const dt = lastFrameTime ? Math.min(48, time - lastFrameTime) : 16;
+			lastFrameTime = time;
+			const { min, max, maxScroll } = getScrollBounds();
+			if (maxScroll <= 0) {
+				strip.scrollLeft = 0;
+				stopAnimation();
+				update();
+				return;
+			}
+			targetScrollLeft = Math.max(min, Math.min(max, targetScrollLeft));
+			const current = strip.scrollLeft;
+			const diff = targetScrollLeft - current;
+			if (Math.abs(diff) < SNAP_EPSILON) {
+				strip.scrollLeft = targetScrollLeft;
+				stopAnimation();
+				update();
+				return;
+			}
+			// Frame-rate independent easing: cover the same fraction of the remaining
+			// distance per 16ms regardless of the display's refresh rate.
+			const fraction = 1 - Math.pow(0.65, dt / 16);
+			strip.scrollLeft = current + diff * fraction;
+			// Update the masks in the same frame as the write; `scroll` is async.
+			update();
+			animationFrame = targetWindow.requestAnimationFrame(step);
+		};
+		store.add(dom.addDisposableListener(strip, dom.EventType.MOUSE_WHEEL, e => {
+			// Never intercept zoom: Ctrl/Cmd + wheel is zoom on Windows/Linux, and
+			// macOS pinch-to-zoom arrives as a wheel event with ctrlKey set.
+			if (e.ctrlKey || e.metaKey) {
+				return;
+			}
+			const { min, max, maxScroll } = getScrollBounds();
+			if (maxScroll <= 0) {
+				return;
+			}
+			const dominant = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+			if (dominant === 0) {
+				return;
+			}
+			const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+				: e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? strip.clientWidth
+					: 1;
+			if (!animationFrame) {
+				targetScrollLeft = Math.max(min, Math.min(max, strip.scrollLeft));
+			}
+			const next = Math.max(min, Math.min(max, targetScrollLeft + dominant * unit));
+			if (next === targetScrollLeft && !animationFrame) {
+				return;
+			}
+			e.preventDefault();
+			e.stopPropagation();
+			targetScrollLeft = next;
+			if (!animationFrame) {
+				animationFrame = targetWindow.requestAnimationFrame(step);
+			}
+		}, { passive: false }));
+		store.add(dom.addDisposableListener(strip, dom.EventType.POINTER_DOWN, stopAnimation));
+		// ResizeObserver catches layout/viewport changes; MutationObserver catches
+		// tabs being added or removed, which changes scrollWidth but not the box.
+		const resizeObserver = new ResizeObserver(onLayoutChange);
+		resizeObserver.observe(strip);
+		store.add(toDisposable(() => resizeObserver.disconnect()));
+		const mutationObserver = new MutationObserver(onLayoutChange);
+		mutationObserver.observe(strip, { childList: true, subtree: true, characterData: true });
+		store.add(toDisposable(() => mutationObserver.disconnect()));
+		store.add(toDisposable(stopAnimation));
+		refreshDirection();
+		update();
 		return store;
 	}
 

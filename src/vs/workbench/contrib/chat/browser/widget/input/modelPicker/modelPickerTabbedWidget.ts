@@ -616,6 +616,7 @@ export class TabbedModelPicker extends Disposable {
 				onHide: () => { },
 			},
 			accessibilityProvider: getModelPickerAccessibilityProvider(this._searchVisible, step?.multiple ?? false),
+			enableTabStripScrollAffordance: true,
 		});
 		if (this._context?.selectedModelId) {
 			this._rememberSpeedVariant(this._context.selectedModelId);
@@ -869,6 +870,7 @@ export class TabbedModelPicker extends Disposable {
 				id: 'addProvider',
 				icon: Codicon.add,
 				tooltip: localize('chat.modelPicker.addProvider', "Add Models..."),
+				alignEnd: true,
 				disabledReason: context.manageModelsDisabledReason,
 				run: () => {
 					this._widget.hide();
