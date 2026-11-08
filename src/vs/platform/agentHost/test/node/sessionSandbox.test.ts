@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { timeout } from '../../../../base/common/async.js';
+import { ChatProvidersConfigKey } from '../../common/agentHostChatProviders.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
@@ -12,8 +14,9 @@ import { AgentHostSandboxKey } from '../../common/sandboxConfigSchema.js';
 import { readSessionSandboxPolicy } from '../../common/meta/agentSandboxPolicyMeta.js';
 import { readChatSandboxState, readChatSandboxStates, readSessionSandboxState, withChatSandboxState, withSessionSandboxState } from '../../common/meta/agentSandboxStateMeta.js';
 import { omitTransientSessionConfigValues, SessionConfigKey } from '../../common/sessionConfigKeys.js';
-import { buildChatUri, buildDefaultChatUri, buildSubagentSessionUri, ChatOriginKind, MessageKind, SessionStatus, ToolCallStatus } from '../../common/state/sessionState.js';
+import { buildChatUri, buildDefaultChatUri, buildSubagentSessionUri, ChatOriginKind, SessionStatus, ToolCallStatus } from '../../common/state/sessionState.js';
 import { ActionType } from '../../common/state/sessionActions.js';
+import { chatToolCallStart, chatTurnStarted } from '../common/chatActionBuilders.js';
 import { AgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { AgentHostStateManager, creationTimeChatStorageResource } from '../../node/agentHostStateManager.js';
 import { getSessionSandboxConfig, getSessionSandboxOverrides } from '../../node/sessionSandbox.js';
@@ -59,6 +62,42 @@ suite('Session sandbox configuration', () => {
 			property: platformSessionSchema.toProtocol().properties.sandboxEnabled.enum,
 			mutable: platformSessionSchema.toProtocol().properties.sandboxEnabled.sessionMutable,
 		}, { values: {}, property: ['default', 'on', 'off'], mutable: true });
+	});
+
+	test('resolution preserves confirmed bypass metadata without mutating applied state', () => {
+		const { configuration, create } = setupSession();
+		const owner = create('resume');
+		const target = { session: owner, chat: buildDefaultChatUri(owner) };
+		configuration.setSessionSandboxPolicy(owner, { enabled: true, allowBypass: true });
+		configuration.setChatSandboxEnabled(target, false);
+		configuration.updateSessionConfig(owner, { sandboxEnabled: 'off' });
+
+		assert.deepStrictEqual({
+			enabled: getSessionSandboxConfig(configuration, target).enabled,
+			applied: configuration.getChatSandboxEnabled(target),
+			selection: configuration.getChatConfigValues(target)?.sandboxEnabled,
+		}, { enabled: 'off', applied: false, selection: 'off' });
+	});
+
+	test('new managed policy retains confirmed off metadata only when bypass is allowed', () => {
+		const results = [];
+		for (const allowBypass of [undefined, false, true]) {
+			const { configuration, create } = setupSession();
+			const owner = create(`confirmed-off-${allowBypass}`, { sandboxEnabled: 'off' });
+			const target = { session: owner, chat: buildDefaultChatUri(owner) };
+			configuration.setChatSandboxEnabled(target, false);
+			configuration.setSessionSandboxPolicy(owner, { enabled: true, ...(allowBypass !== undefined ? { allowBypass } : {}) });
+			results.push({
+				enabled: getSessionSandboxConfig(configuration, target).enabled,
+				applied: configuration.getChatSandboxEnabled(target),
+				selection: configuration.getChatConfigValues(target)?.sandboxEnabled,
+			});
+		}
+		assert.deepStrictEqual(results, [
+			{ enabled: 'on', applied: undefined, selection: 'on' },
+			{ enabled: 'on', applied: undefined, selection: 'on' },
+			{ enabled: 'off', applied: false, selection: 'off' },
+		]);
 	});
 
 	test('publishes session-scoped policy changes in serializable subscription state', () => {
@@ -421,6 +460,29 @@ suite('Session sandbox configuration', () => {
 			});
 		});
 
+		test('with chats with their own agents on, the session\'s "Disable sandboxing" replaces the default chat\'s own selection, not a peer\'s, and the default chat follows a managed floor', async () => {
+			const { manager, configuration, owner, peer, defaultTarget, peerTarget } = setupChats({ sandboxEnabled: 'on' });
+			configuration.updateRootConfig({ [ChatProvidersConfigKey.Enabled]: true });
+			await timeout(0);
+			manager.dispatchClientAction(defaultTarget.chat, { type: ActionType.ChatConfigChanged, config: { sandboxEnabled: 'on' } }, { clientId: 'client', clientSeq: 1 });
+			manager.dispatchClientAction(peer, { type: ActionType.ChatConfigChanged, config: { sandboxEnabled: 'on' } }, { clientId: 'client', clientSeq: 2 });
+			manager.dispatchClientAction(owner, { type: ActionType.SessionConfigChanged, config: { sandboxEnabled: 'off' } }, { clientId: 'client', clientSeq: 3 });
+			const read = () => ({
+				enabled: [defaultTarget, peerTarget].map(target => getSessionSandboxConfig(configuration, target).enabled),
+				published: manager.getChatConfig(defaultTarget.chat)?.values.sandboxEnabled,
+				defaultOwn: configuration.getChatPersistedConfigValues(defaultTarget.chat)?.sandboxEnabled,
+				peerOwn: configuration.getChatOwnConfigValues(peerTarget).sandboxEnabled,
+			});
+			const disabled = read();
+			// A managed floor without bypass rolls the session's off back; the default chat follows it.
+			configuration.setSessionSandboxPolicy(owner, { enabled: true });
+			assert.deepStrictEqual({ disabled, floored: read(), session: configuration.getSessionConfigValues(owner)?.sandboxEnabled }, {
+				disabled: { enabled: ['off', 'on'], published: 'off', defaultOwn: undefined, peerOwn: 'on' },
+				floored: { enabled: ['on', 'on'], published: 'on', defaultOwn: undefined, peerOwn: 'on' },
+				session: 'on',
+			});
+		});
+
 		test('a client\'s own off for a chat survives policy republishing while the policy allows bypass, and not its revocation', () => {
 			const { manager, configuration, owner, peer, peerTarget } = setupChats({ sandboxEnabled: 'on' });
 			configuration.setSessionSandboxPolicy(owner, { enabled: true, allowBypass: true });
@@ -623,11 +685,8 @@ suite('Session sandbox configuration', () => {
 		const peer = buildChatUri(owner, 'peer');
 		manager.addChat(owner, peer, creationTimeChatStorageResource(owner, peer, buildDefaultChatUri(owner)));
 		const permissions = store.add(new SessionPermissionManager(manager, {}, configuration, new NullLogService(), createSessionDataService(), createTestChatOwnershipService(manager)));
-		manager.dispatchServerAction(peer, {
-			type: ActionType.ChatTurnStarted, turnId: 'turn', startedAt: '2026-01-01T00:00:00Z',
-			message: { text: 'run', origin: { kind: MessageKind.User } },
-		});
-		manager.dispatchServerAction(peer, { type: ActionType.ChatToolCallStart, turnId: 'turn', toolCallId: 'tool', toolName: 'bash', displayName: 'Bash' });
+		manager.dispatchServerAction(peer, chatTurnStarted('turn', 'run', '2026-01-01T00:00:00Z'));
+		manager.dispatchServerAction(peer, chatToolCallStart('turn', 'tool', 'bash', 'Bash'));
 		const ready = permissions.createToolReadyAction({
 			kind: 'pending_confirmation', chat: URI.parse(peer), requestSandboxBypass: true,
 			state: { status: ToolCallStatus.PendingConfirmation, toolCallId: 'tool', toolName: 'bash', displayName: 'Bash', invocationMessage: 'run', confirmationTitle: 'Outside sandbox?' },
@@ -651,7 +710,6 @@ suite('Session sandbox configuration', () => {
 	test('managed enablement rejects direct Off but permits confirmed opt-out and re-enablement', () => {
 		const { configuration, create } = setupSession();
 		const owner = create('bypass', { sandboxEnabled: 'off' });
-		configuration.setChatSandboxEnabled({ session: owner, chat: buildDefaultChatUri(owner) }, false);
 		configuration.setSessionSandboxPolicy(owner, { enabled: true, allowBypass: true });
 		const beforeApproval = { selection: configuration.getSessionConfigValues(owner)?.sandboxEnabled, enabled: getSessionSandboxOverrides(configuration, { session: owner, chat: buildDefaultChatUri(owner) }).enabled };
 		configuration.setChatSandboxEnabled({ session: owner, chat: buildDefaultChatUri(owner) }, false);

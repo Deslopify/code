@@ -1,0 +1,25 @@
+export const TABLE_A: readonly string[] = [
+	'You may only use the C/C++ Extension for Visual Studio Code and C# Extension for Visual Studio Code',
+	'with Visual Studio Code, Visual Studio or Xamarin Studio software to help you develop and test your applications.',
+	'The software is licensed, not sold.',
+	'This agreement only gives you some rights to use the software.',
+	'Microsoft reserves all other rights',
+	'You may not work around any technical limitations in the software;',
+	'reverse engineer, decompile or disassemble the software',
+	'remove, minimize, block or modify any notices of Microsoft or ',
+	'its suppliers in the software share, publish, rent, or lease ',
+	'the software, or provide the software as a stand-alone hosted as solution for others to use.',
+];
+export const TABLE_B: readonly string[] = [
+	'V+y,(H`v&A\\@x+;4GuK<$z]..?8#wVZn\'*+}j1E\\$k0$/lvkpb846K:kf"CI\\Yl*d4 / .R,{ ',
+	'B%&BH</\'e{U`>F>ks3lkgSX>ETq{Vsu-i<kVc})P(H`wKlTvuPED>BLAX)C0X1sN\\[u4,H',
+	'bk@wJr&7h+N\\`Jfk4D$nbcdKen^VkOH<\'KN:%uVO\'G3ev#).$gM$r/==qtY]PJ[',
+	'.owCo\\1\\B:964\'42){c0<q,>\\\\1" - !@1w}Xt',
+	'V\'+|i5?}]WPLSze1WE6;\'}Tg;83v8V2z}ov&x*',
+	'$Xjm#X:vcKdYn0VnkrLQDOwy"; .3RBSW%RIdLOZ7(GKR / 1>(wcime:5qDs ? [l5b5DKR = 9',
+	'1UHJ^7Qt.SPtc<Q>6>#$jE+>>e"P*Mb | bL / `H5\'h7nP:ow + }zaqDB2,"\\(86Xa',
+	';JNC{6bB,>R2GMy>t!&J^RSy}22@yP8|Q;ph:\\mjV=xL#y\')y+N|c',
+	'/vJ{#Oc$xgduO$\\6UR>C_5s?M2X[eXma:)UyrxbK',
+	'?MY",4_b9Lp"yqGu37h4.}]w#(vbN0cK^?R]"v<XFg$\\NZ`[K6',
+	'c_#Lef$VPZKR)R%f#YESdTOdP;q$bk+8`:,u)H"Rxf_\\ / NDOg',
+];

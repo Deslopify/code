@@ -2,33 +2,21 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from 'fs';
+import path from 'path';
+import { resolvePackageDirectory } from '../esbuild-common.mts';
 import { run } from '../esbuild-webview-common.mts';
 
 const srcDir = path.join(import.meta.dirname, 'notebook');
 const outDir = path.join(import.meta.dirname, 'notebook-out');
 
 function postBuild(outDir: string) {
-	fs.cpSync(
-		path.join(
-			import.meta.dirname,
-			'node_modules',
-			'katex',
-			'dist',
-			'katex.min.css',
-		),
-		path.join(outDir, 'katex.min.css'),
-		{ recursive: true },
-	);
+	const katexDir = resolvePackageDirectory(import.meta.dirname, 'katex');
+	fs.copyFileSync(
+		path.join(katexDir, 'dist', 'katex.min.css'),
+		path.join(outDir, 'katex.min.css'));
 
-	const fontsDir = path.join(
-		import.meta.dirname,
-		'node_modules',
-		'katex',
-		'dist',
-		'fonts',
-	);
+	const fontsDir = path.join(katexDir, 'dist', 'fonts');
 	const fontsOutDir = path.join(outDir, 'fonts/');
 
 	fs.mkdirSync(fontsOutDir, { recursive: true });

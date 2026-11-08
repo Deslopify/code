@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { compressTikToken } from './build/compressTikToken';
 import { copyStaticAssets } from './build/copyStaticAssets';
+import { copyFileReplacing, writeFileReplacing } from './build/replaceFile';
 
 export interface ITreeSitterGrammar {
 	name: string;

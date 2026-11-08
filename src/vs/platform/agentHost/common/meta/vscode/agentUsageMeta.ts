@@ -6,7 +6,7 @@
 import type { Mutable } from '../../../../../base/common/types.js';
 import { LOCAL_MODEL_META_KEY, localTurnExecutions, type ILocalTurnExecution } from '../../localModel.js';
 import type { UsageInfo } from '../../state/protocol/common/state.js';
-import type { IAutoModeResolvedInfo, IContextAttributionData, IContextAttributionEntry, ITurnTokenTotal, SessionMeta } from '../../state/sessionState.js';
+import type { IModelRoutedInfo, IAutoModeResolvedInfo, IContextAttributionData, IContextAttributionEntry, ITurnTokenTotal, SessionMeta } from '../../state/sessionState.js';
 
 function isTokenCount(value: unknown): value is number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -112,6 +112,8 @@ export interface UsageInfoMeta {
 	cost?: number;
 	/** The concrete model selected by Copilot Auto and the routing explanation. */
 	autoModeResolved?: IAutoModeResolvedInfo;
+	/** The model a host-side router picked for this turn. */
+	modelRouted?: IModelRoutedInfo;
 	/** Copilot-specific usage breakdown, including nano-AIU totals. */
 	copilotUsage?: {
 		/** This turn's nano-AIU cost. */
@@ -211,6 +213,8 @@ export function readUsageInfoMeta(usage: UsageInfo | undefined): UsageInfoMeta {
 	if (typeof meta.cost === 'number') { result.cost = meta.cost; }
 	const autoModeResolved = readAutoModeResolvedInfo(meta.autoModeResolved);
 	if (autoModeResolved) { result.autoModeResolved = autoModeResolved; }
+	const modelRouted = readModelRoutedInfo(meta.modelRouted);
+	if (modelRouted) { result.modelRouted = modelRouted; }
 	const copilotUsage = meta.copilotUsage;
 	if (copilotUsage && typeof copilotUsage === 'object' && !Array.isArray(copilotUsage)) {
 		const rawUsage = copilotUsage as Record<string, unknown>;
@@ -284,6 +288,25 @@ function readTurnTokenTotals(value: unknown): readonly ITurnTokenTotal[] | undef
 }
 
 
+function readModelRoutedInfo(value: unknown): IModelRoutedInfo | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	const raw = value as Partial<Record<keyof IModelRoutedInfo, unknown>>;
+	if (typeof raw.router !== 'string' || typeof raw.chosenModel !== 'string') {
+		return undefined;
+	}
+	return {
+		router: raw.router,
+		chosenModel: raw.chosenModel,
+		...(typeof raw.preference === 'string' ? { preference: raw.preference } : {}),
+		...(typeof raw.effort === 'string' ? { effort: raw.effort } : {}),
+		...(typeof raw.switchedFrom === 'string' ? { switchedFrom: raw.switchedFrom } : {}),
+		...(raw.defaulted === true ? { defaulted: true } : {}),
+		...(raw.kept === true ? { kept: true } : {}),
+	};
+}
+
 function readAutoModeResolvedInfo(value: unknown): IAutoModeResolvedInfo | undefined {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) {
 		return undefined;
@@ -316,6 +339,17 @@ function readAutoModeResolvedInfo(value: unknown): IAutoModeResolvedInfo | undef
 		result.selectionReason = raw.selectionReason;
 	}
 	return result;
+}
+
+
+/**
+ * Reduces a provider's Auto routing decision to the fields clients read, before
+ * it is written to {@link UsageInfoMeta.autoModeResolved}. The decision rides on
+ * every usage report of its turn, so routing diagnostics that only telemetry
+ * needs (available models, latencies, fallback details, ...) are dropped.
+ */
+export function compactAutoModeResolved(value: IAutoModeResolvedInfo): IAutoModeResolvedInfo {
+	return readAutoModeResolvedInfo(value) ?? { chosenModel: value.chosenModel };
 }
 
 
@@ -354,6 +388,46 @@ function readContextAttribution(value: unknown): IContextAttributionData | undef
 		? { count: (compactionsRaw as Record<string, unknown>).count as number }
 		: { count: 0 };
 	return { totalTokens: raw.totalTokens as number, entries, compactions };
+}
+
+
+/**
+ * Reduces a provider's context-window attribution to the rows clients render,
+ * before it is written to {@link UsageInfoMeta.contextAttribution}.
+ *
+ * Each usage report replaces the turn's whole usage, so the provider's
+ * per-source breakdown (one entry per tool definition, tool, skill, MCP
+ * server, ...) would otherwise be resent with every report, kept on every
+ * completed turn, and persisted with it. Clients show `system` entries that
+ * parent no other entry individually and sum every other entry per `kind`, so
+ * this keeps the former and collapses the latter into one entry per kind,
+ * dropping fields no client reads. The result remains valid attribution that
+ * renders identically.
+ */
+export function compactContextAttribution(value: unknown): IContextAttributionData | undefined {
+	const attribution = readContextAttribution(value);
+	if (!attribution) {
+		return undefined;
+	}
+	const parentIds = new Set<string>();
+	for (const entry of attribution.entries) {
+		if (entry.parentId) {
+			parentIds.add(entry.parentId);
+		}
+	}
+	const entries: IContextAttributionEntry[] = [];
+	const kindTokens = new Map<string, number>();
+	for (const entry of attribution.entries) {
+		if (entry.kind !== 'system') {
+			kindTokens.set(entry.kind, (kindTokens.get(entry.kind) ?? 0) + entry.tokens);
+		} else if (!parentIds.has(entry.id)) {
+			entries.push({ kind: entry.kind, id: entry.id, label: entry.label, tokens: entry.tokens });
+		}
+	}
+	for (const [kind, tokens] of kindTokens) {
+		entries.push({ kind, id: kind, label: kind, tokens });
+	}
+	return { totalTokens: attribution.totalTokens, entries, compactions: attribution.compactions };
 }
 
 

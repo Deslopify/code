@@ -10,6 +10,7 @@ import { ActionBar } from '../../../base/browser/ui/actionbar/actionbar.js';
 import { Button } from '../../../base/browser/ui/button/button.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IListAccessibilityProvider } from '../../../base/browser/ui/list/listWidget.js';
+import { Menu } from '../../../base/browser/ui/menu/menu.js';
 import { Radio } from '../../../base/browser/ui/radio/radio.js';
 import { DomScrollableElement } from '../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { toAction } from '../../../base/common/actions.js';
@@ -29,7 +30,7 @@ import { IContextViewService } from '../../contextview/browser/contextView.js';
 import { IHoverService } from '../../hover/browser/hover.js';
 import { IInstantiationService } from '../../instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../keybinding/common/keybinding.js';
-import { defaultButtonStyles } from '../../theme/browser/defaultStyles.js';
+import { defaultButtonStyles, defaultMenuStyles } from '../../theme/browser/defaultStyles.js';
 import { ActionList, IActionListDelegate, IActionListItem, IActionListOptions, IActionListUpdateOptions } from './actionList.js';
 import { ACTION_WIDGET_ANIMATED_CLASS, ACTION_WIDGET_DROPDOWN_MOTION_CLASS, finishActionWidgetOpeningAnimation } from './actionWidgetMotion.js';
 import './tabbedActionListWidget.css';
@@ -122,6 +123,10 @@ export interface ITabBarAction {
 	readonly useManagedHover?: boolean;
 	/** When true, the button renders in its pressed state. */
 	readonly checked?: boolean;
+	/** When set, the button is disabled and its managed hover explains why instead of showing {@link tooltip}. */
+	readonly disabledReason?: string;
+	/** Attaches consumer-owned behavior for this rendered button's lifetime. */
+	render?(button: HTMLElement): IDisposable;
 	run(): void;
 }
 
@@ -158,8 +163,12 @@ export interface ITabbedActionListShowOptions<T> {
 	 * while the popup stays open is not replayed stale on a tab switch.
 	 */
 	readonly widgetClassNames?: (activeTab: string) => readonly string[];
+	/** Attaches behavior scoped to the popup's `.action-widget` element for its lifetime. */
+	renderWidget?(container: HTMLElement): IDisposable;
 	/** Tab whose contents fix the popup's height, so switching tabs scrolls instead of resizing. */
 	readonly sizingTab?: string;
+	/** Remeasures the popup when its content mode changes, without dismissing it or changing its anchor side. */
+	readonly sizingKey?: string;
 	/** Show the checked item's hover after the popup has been positioned. */
 	readonly showCheckedItemHover?: boolean;
 	/** Optional icon buttons rendered after the tabs. */
@@ -169,6 +178,12 @@ export interface ITabbedActionListShowOptions<T> {
 	 * and a tab with no icon always shows its label. Defaults to `always`.
 	 */
 	readonly tabLabels?: 'always' | 'active' | 'never';
+	/**
+	 * Moves the tabs the tab bar has no room for into a menu, opened by a button with this
+	 * label, e.g. "More Providers". The active tab always stays on the bar. When unset, every
+	 * tab stays on the bar however many there are.
+	 */
+	readonly overflowLabel?: string;
 	/**
 	 * When true, the list's filter row is rendered inside the tab bar in place of the
 	 * tabs, rather than as its own row below them.
@@ -190,6 +205,11 @@ export interface ITabbedActionListShowOptions<T> {
 	 * Returns false when the item has no details.
 	 */
 	openItemDetails?(item: IActionListItem<T>): boolean;
+	/**
+	 * Adds edge fades and smooth wheel scrolling to the tab strip when its tabs
+	 * overflow horizontally. Reattached on every render, including tab swaps.
+	 */
+	readonly enableTabStripScrollAffordance?: boolean;
 }
 
 export interface ITabbedActionListRefreshOptions extends IActionListUpdateOptions {
@@ -231,10 +251,13 @@ export class TabbedActionListWidget extends Disposable {
 	/** Boxes and labels from the last render, so the next one can animate from them. */
 	private _previousTabBoxes: Map<string, ITabBox> | undefined;
 	private _previousTabTexts: ReadonlyMap<string, string> | undefined;
+	/** The tabs the last render moved into the overflow menu, and the bar width it fitted them to. */
+	private _fittedTabs: { readonly width: number; readonly hidden: ReadonlySet<string> } | undefined;
 	/** List height from {@link ITabbedActionListShowOptions.sizingTab}, recomputed when items change. */
 	private _fixedListHeight: number | undefined;
 	private _fixedPopupHeight: number | undefined;
 	private _hasMeasuredSizingTab = false;
+	private _sizingKey: string | undefined;
 	/** Side of the anchor the popup opened on, kept across tab swaps so it cannot jump sides. */
 	private _anchorPosition: AnchorPosition | undefined;
 
@@ -269,11 +292,18 @@ export class TabbedActionListWidget extends Disposable {
 			// A fresh popup has nothing to animate from, and its models may have changed.
 			this._previousTabBoxes = undefined;
 			this._previousTabTexts = undefined;
+			this._fittedTabs = undefined;
 			this._fixedListHeight = undefined;
 			this._fixedPopupHeight = undefined;
 			this._hasMeasuredSizingTab = false;
 			this._anchorPosition = undefined;
 		}
+		if (this._sizingKey !== options.sizingKey) {
+			this._fixedListHeight = undefined;
+			this._fixedPopupHeight = undefined;
+			this._hasMeasuredSizingTab = false;
+		}
+		this._sizingKey = options.sizingKey;
 
 		let activeTab = options.initialTab;
 		const popupDisposables = new DisposableStore();
@@ -303,6 +333,9 @@ export class TabbedActionListWidget extends Disposable {
 				let pendingRefresh: ITabbedActionListRefreshOptions | undefined;
 
 				const widget = dom.append(container, dom.$('.action-widget'));
+				if (options.renderWidget) {
+					renderDisposables.add(options.renderWidget(widget));
+				}
 				// Programmatic page focus can match :focus-visible even after a pointer click.
 				renderDisposables.add(dom.addDisposableListener(widget, dom.EventType.KEY_DOWN, () => widget.classList.add('keyboard-navigation'), true));
 				renderDisposables.add(dom.addDisposableListener(widget, dom.EventType.POINTER_DOWN, () => widget.classList.remove('keyboard-navigation'), true));
@@ -340,6 +373,9 @@ export class TabbedActionListWidget extends Disposable {
 				// A consumer showing a filter hides the strip and takes its place, so the
 				// trailing actions never move.
 				const tabStrip = dom.append(tabBar, dom.$('.tabbed-action-list-tabstrip'));
+				if (options.enableTabStripScrollAffordance) {
+					renderDisposables.add(this._attachTabStripScrollAffordance(tabStrip));
+				}
 				const filterSlot = dom.append(tabBar, dom.$('.tabbed-action-list-filter-slot'));
 
 				const activateTab = (next: string) => {
@@ -386,6 +422,151 @@ export class TabbedActionListWidget extends Disposable {
 					}
 				}));
 
+				// Lists the tabs the bar has no room for. It only shows while some are hidden.
+				const overflowLabel = options.overflowLabel;
+				const overflowButton = overflowLabel !== undefined ? dom.append(tabStrip, dom.$('button.tabbed-action-list-tabbar-action.tabbed-action-list-overflow')) : undefined;
+				tabBar.classList.toggle('can-overflow-tabs', !!overflowButton);
+				/** The tabs the bar has no room for, in tab order. */
+				let overflowTabs: readonly ITabDescriptor[] = [];
+				let overflowMenuHost: HTMLElement | undefined;
+				const overflowMenu = renderDisposables.add(new MutableDisposable<DisposableStore>());
+				const closeOverflowMenu = (restoreFocus: boolean) => {
+					if (overflowMenu.value) {
+						overflowMenu.clear();
+						if (restoreFocus) {
+							overflowButton?.focus();
+						}
+					}
+				};
+				if (overflowButton && overflowLabel !== undefined) {
+					overflowButton.dataset.id = 'overflow';
+					overflowButton.ariaLabel = overflowLabel;
+					overflowButton.setAttribute('aria-haspopup', 'menu');
+					overflowButton.setAttribute('aria-expanded', 'false');
+					renderDisposables.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('element'), overflowButton, overflowLabel));
+					dom.append(overflowButton, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.more)}`));
+					dom.hide(overflowButton);
+					const openOverflowMenu = (focusFirstItem: boolean) => {
+						const store = new DisposableStore();
+						overflowMenu.value = store;
+						overflowButton.classList.add('checked');
+						overflowButton.setAttribute('aria-expanded', 'true');
+						// A context menu would replace this popup, so the menu is hosted inside it instead.
+						const host = overflowMenuHost = dom.append(tabBar, dom.$('.context-view.tabbed-action-list-overflow-menu'));
+						store.add(toDisposable(() => {
+							host.remove();
+							overflowMenuHost = undefined;
+							overflowButton.classList.remove('checked');
+							overflowButton.setAttribute('aria-expanded', 'false');
+						}));
+						const menu = store.add(new Menu(host, overflowTabs.map(tab => toAction({
+							id: tab.id,
+							label: tab.label ?? tab.id,
+							run: () => {
+								closeOverflowMenu(false);
+								activateTab(tab.id);
+							},
+						})), { ariaLabel: overflowLabel }, defaultMenuStyles));
+						store.add(menu.onDidCancel(() => closeOverflowMenu(true)));
+						store.add(menu.onDidBlur(() => closeOverflowMenu(false)));
+						// Starts under the button, moved left as far as it takes to stay on the bar.
+						host.style.left = `${Math.max(0, Math.min(overflowButton.offsetLeft, tabBar.clientWidth - host.offsetWidth))}px`;
+						menu.focus(focusFirstItem);
+					};
+					// While the menu is open, pressing the button must not blur the menu, or the click reopens it.
+					renderDisposables.add(dom.addDisposableListener(overflowButton, dom.EventType.MOUSE_DOWN, e => {
+						if (overflowMenu.value) {
+							e.preventDefault();
+						}
+					}));
+					renderDisposables.add(dom.addDisposableListener(overflowButton, dom.EventType.CLICK, e => {
+						dom.EventHelper.stop(e, true);
+						if (overflowMenu.value) {
+							closeOverflowMenu(true);
+						} else {
+							// A click from Enter or Space has no pointer, and moves straight to the first tab.
+							openOverflowMenu(e.detail === 0);
+						}
+					}));
+					renderDisposables.add(dom.addStandardDisposableListener(overflowButton, dom.EventType.KEY_DOWN, e => {
+						if (e.keyCode === KeyCode.DownArrow && !overflowMenu.value) {
+							dom.EventHelper.stop(e, true);
+							openOverflowMenu(true);
+						}
+					}));
+				}
+				/** Fits the tabs to the bar's width, so none overflows it or squeezes the active tab's label. */
+				let fittedWidth: number | undefined;
+				const fitTabs = () => {
+					// The tabs animate their widths on a switch, so the bar is only refitted when its own width changes.
+					const width = tabBar.clientWidth;
+					if (!overflowButton || width === fittedWidth) {
+						return;
+					}
+					fittedWidth = width;
+					// Refitting can hide the button or the menu holding focus, which must not leave the popup.
+					const activeElement = dom.getActiveElement();
+					const overflowHadFocus = activeElement === overflowButton || !!overflowMenuHost?.contains(activeElement);
+					closeOverflowMenu(false);
+					const elements = radio.optionElements;
+					// A switch keeps the tabs the bar already hid, and may only hide more to make room for
+					// the new active tab's label: a tab that appears where the user clicked reads as a misclick.
+					const previous = this._fittedTabs;
+					const keptHidden = previous?.width === width ? previous.hidden : undefined;
+					const isHidden = (index: number) => elements[index].style.display === 'none';
+					options.tabs.forEach((tab, index) => {
+						if (tab.id !== activeTab && keptHidden?.has(tab.id)) {
+							dom.hide(elements[index]);
+						} else {
+							dom.show(elements[index]);
+						}
+					});
+					dom.hide(overflowButton);
+					overflowTabs = [];
+					// Nothing to fit while the strip is hidden, e.g. by a filter in its place.
+					if (!tabStrip.getClientRects().length) {
+						return;
+					}
+					// The tabs may not shrink while measuring, so they spill out of the radio, or the radio out of
+					// the bar, by what does not fit. The radio itself may still shrink: sized as a share of the
+					// strip, it would otherwise grow with it and overflow by more than its tabs do.
+					for (const element of elements) {
+						element.style.flexShrink = '0';
+					}
+					const overflows = () => radio.domNode.scrollWidth > radio.domNode.clientWidth + 1 || tabBar.scrollWidth > tabBar.clientWidth + 1;
+					if (options.tabs.some((_, index) => isHidden(index)) || overflows()) {
+						dom.show(overflowButton);
+						for (let index = options.tabs.length - 1; index >= 0 && overflows(); index--) {
+							if (options.tabs[index].id !== activeTab) {
+								dom.hide(elements[index]);
+							}
+						}
+						overflowTabs = options.tabs.filter((_, index) => isHidden(index));
+						if (!overflowTabs.length) {
+							dom.hide(overflowButton);
+						}
+					}
+					for (const element of elements) {
+						element.style.removeProperty('flex-shrink');
+					}
+					this._fittedTabs = { width, hidden: new Set(overflowTabs.map(tab => tab.id)) };
+					if (overflowHadFocus) {
+						if (overflowTabs.length) {
+							overflowButton.focus();
+						} else {
+							radio.focusActiveItem();
+						}
+					}
+				};
+				if (overflowButton) {
+					// The window can narrow or widen the popup, e.g. against its maximum width, without laying it out
+					// again. Refitting resizes the bar, so it waits for the next frame rather than reentering the observer.
+					const scheduledFit = renderDisposables.add(new MutableDisposable());
+					const tabBarObserver = renderDisposables.add(new dom.DisposableResizeObserver('TabbedActionListWidget.tabBar', () => {
+						scheduledFit.value = dom.scheduleAtNextAnimationFrame(dom.getWindow(tabBar), () => fitTabs());
+					}, dom.getWindow(tabBar)));
+					renderDisposables.add(tabBarObserver.observe(tabBar));
+				}
 				for (const tabAction of options.tabBarActions ?? []) {
 					const container = tabAction.alignEnd ? tabBar : tabStrip;
 					const button = dom.append(container, dom.$('button.tabbed-action-list-tabbar-action'));
@@ -393,10 +574,19 @@ export class TabbedActionListWidget extends Disposable {
 					button.classList.toggle('checked', !!tabAction.checked);
 					button.dataset.id = tabAction.id;
 					button.ariaLabel = tabAction.tooltip;
-					if (tabAction.useManagedHover) {
-						renderDisposables.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('element'), button, tabAction.tooltip));
+					// `aria-disabled` rather than `disabled`, so the button stays focusable and hoverable to explain why.
+					const disabledReason = tabAction.disabledReason;
+					button.classList.toggle('disabled', !!disabledReason);
+					if (disabledReason) {
+						button.setAttribute('aria-disabled', 'true');
+						button.setAttribute('aria-description', disabledReason);
+					}
+					const hover = disabledReason ?? tabAction.tooltip;
+					// A disabled reason always uses a managed hover: a native title is easy to miss and never shows on keyboard focus.
+					if (tabAction.useManagedHover || disabledReason) {
+						renderDisposables.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('element'), button, hover));
 					} else {
-						button.title = tabAction.tooltip;
+						button.title = hover;
 					}
 					// Only an action with a real on/off state announces as a toggle. A
 					// momentary one would otherwise read as a toggle that is switched off.
@@ -406,8 +596,13 @@ export class TabbedActionListWidget extends Disposable {
 					dom.append(button, dom.$(`span${ThemeIcon.asCSSSelector(tabAction.icon)}`));
 					renderDisposables.add(dom.addDisposableListener(button, dom.EventType.CLICK, e => {
 						dom.EventHelper.stop(e, true);
-						tabAction.run();
+						if (!disabledReason) {
+							tabAction.run();
+						}
 					}));
+					if (tabAction.render) {
+						renderDisposables.add(tabAction.render(button));
+					}
 				}
 
 				// Built before the active tab's list because a consumer may hold per-tab state
@@ -486,6 +681,7 @@ export class TabbedActionListWidget extends Disposable {
 						this._fixedPopupHeight = undefined;
 					}
 					list.updateItems(refreshed.items, refreshOptions?.focusItemId, {
+						focusFilter: refreshOptions?.focusFilter,
 						preserveHover: refreshOptions?.preserveHover,
 						preserveScrollPosition: refreshOptions?.preserveScrollPosition,
 						animateItemMove: refreshOptions?.animateItemMove && !this._accessibilityService.isMotionReduced(),
@@ -552,6 +748,7 @@ export class TabbedActionListWidget extends Disposable {
 						: Math.max(0, this._fixedPopupHeight - getChromeHeight(list.domNode));
 					const width = list.layout(0, contentHeight);
 					widget.style.width = `${options.width ?? width}px`;
+					fitTabs();
 					if (emptyBody && this._fixedListHeight !== undefined) {
 						emptyBody.style.minHeight = list.domNode.style.height;
 					}
@@ -770,7 +967,7 @@ export class TabbedActionListWidget extends Disposable {
 					// sign-in button or the detail card's pin, and so do rows with a toolbar or
 					// switch. Keys pressed there belong to those controls rather than to the list
 					// sitting behind them.
-					const onOwnControls = !!target?.closest('.tabbed-action-list-empty, .action-list-submenu-panel, .tabbed-action-list-details, .action-list-item-toolbar, .action-list-item-inline-toggle');
+					const onOwnControls = !!target?.closest('.tabbed-action-list-empty, .tabbed-action-list-overflow-menu, .action-list-submenu-panel, .tabbed-action-list-details, .action-list-item-toolbar, .action-list-item-inline-toggle');
 					const listNavigation = !onTabBar && !onFooter && !onOwnControls;
 
 					if (e.keyCode === KeyCode.Escape) {
@@ -846,7 +1043,7 @@ export class TabbedActionListWidget extends Disposable {
 						return;
 					}
 					const activeElement = dom.getActiveElement();
-					if (activeElement && (activeElement.closest('.action-widget-hover') || activeElement.closest('.action-list-submenu-panel'))) {
+					if (activeElement && (dom.isAncestorUsingFlowTo(activeElement, container) || activeElement.closest('.action-widget-hover') || activeElement.closest('.action-list-submenu-panel'))) {
 						return;
 					}
 					hide();
@@ -889,13 +1086,13 @@ export class TabbedActionListWidget extends Disposable {
 		}
 	}
 
-	/** Boxes of the currently rendered tabs, keyed by tab id. */
+	/** Boxes of the currently rendered tabs, keyed by tab id. Tabs moved into the overflow menu have none. */
 	private _measureTabBoxes(radio: Radio, tabs: readonly ITabDescriptor[]): Map<string, ITabBox> {
 		const boxes = new Map<string, ITabBox>();
 		const elements = radio.optionElements;
 		for (let index = 0; index < tabs.length; index++) {
 			const element = elements[index];
-			if (element) {
+			if (element && element.style.display !== 'none') {
 				boxes.set(tabs[index].id, readTabBox(element));
 			}
 		}
@@ -947,6 +1144,120 @@ export class TabbedActionListWidget extends Disposable {
 			dom.isHTMLElement(child) && !child.classList.contains('codicon'));
 		labelSpan?.animate([{ maxWidth: `${labelSpan.scrollWidth}px` }, { maxWidth: '0px' }], TAB_RESIZE_ANIMATION);
 		animation.finished.then(() => store.dispose(), () => { });
+		return store;
+	}
+
+	/**
+	 * Adds edge fades and smooth wheel scrolling to the tab strip when its tabs
+	 * overflow horizontally. Returns a disposable that removes the behavior.
+	 */
+	private _attachTabStripScrollAffordance(strip: HTMLElement): IDisposable {
+		const store = new DisposableStore();
+		strip.classList.add('scrollable');
+		store.add(toDisposable(() => strip.classList.remove('scrollable')));
+		const targetWindow = dom.getWindow(strip);
+		const EDGE_EPSILON = 1;
+		const SNAP_EPSILON = 1;
+		let isRTL = false;
+		const getScrollBounds = () => {
+			const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+			return isRTL
+				? { min: -maxScroll, max: 0, maxScroll }
+				: { min: 0, max: maxScroll, maxScroll };
+		};
+		const update = () => {
+			const { min, max } = getScrollBounds();
+			strip.classList.toggle('scroll-left', strip.scrollLeft > min + EDGE_EPSILON);
+			strip.classList.toggle('scroll-right', strip.scrollLeft < max - EDGE_EPSILON);
+		};
+		const refreshDirection = () => {
+			isRTL = targetWindow.getComputedStyle(strip).direction === 'rtl';
+		};
+		const onLayoutChange = () => {
+			refreshDirection();
+			update();
+		};
+		store.add(dom.addDisposableListener(strip, dom.EventType.SCROLL, update));
+		let targetScrollLeft = 0;
+		let animationFrame = 0;
+		let lastFrameTime = 0;
+		const stopAnimation = () => {
+			if (animationFrame) {
+				targetWindow.cancelAnimationFrame(animationFrame);
+				animationFrame = 0;
+			}
+			lastFrameTime = 0;
+		};
+		const step = (time: number) => {
+			const dt = lastFrameTime ? Math.min(48, time - lastFrameTime) : 16;
+			lastFrameTime = time;
+			const { min, max, maxScroll } = getScrollBounds();
+			if (maxScroll <= 0) {
+				strip.scrollLeft = 0;
+				stopAnimation();
+				update();
+				return;
+			}
+			targetScrollLeft = Math.max(min, Math.min(max, targetScrollLeft));
+			const current = strip.scrollLeft;
+			const diff = targetScrollLeft - current;
+			if (Math.abs(diff) < SNAP_EPSILON) {
+				strip.scrollLeft = targetScrollLeft;
+				stopAnimation();
+				update();
+				return;
+			}
+			// Frame-rate independent easing: cover the same fraction of the remaining
+			// distance per 16ms regardless of the display's refresh rate.
+			const fraction = 1 - Math.pow(0.65, dt / 16);
+			strip.scrollLeft = current + diff * fraction;
+			// Update the masks in the same frame as the write; `scroll` is async.
+			update();
+			animationFrame = targetWindow.requestAnimationFrame(step);
+		};
+		store.add(dom.addDisposableListener(strip, dom.EventType.MOUSE_WHEEL, e => {
+			// Never intercept zoom: Ctrl/Cmd + wheel is zoom on Windows/Linux, and
+			// macOS pinch-to-zoom arrives as a wheel event with ctrlKey set.
+			if (e.ctrlKey || e.metaKey) {
+				return;
+			}
+			const { min, max, maxScroll } = getScrollBounds();
+			if (maxScroll <= 0) {
+				return;
+			}
+			const dominant = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+			if (dominant === 0) {
+				return;
+			}
+			const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+				: e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? strip.clientWidth
+					: 1;
+			if (!animationFrame) {
+				targetScrollLeft = Math.max(min, Math.min(max, strip.scrollLeft));
+			}
+			const next = Math.max(min, Math.min(max, targetScrollLeft + dominant * unit));
+			if (next === targetScrollLeft && !animationFrame) {
+				return;
+			}
+			e.preventDefault();
+			e.stopPropagation();
+			targetScrollLeft = next;
+			if (!animationFrame) {
+				animationFrame = targetWindow.requestAnimationFrame(step);
+			}
+		}, { passive: false }));
+		store.add(dom.addDisposableListener(strip, dom.EventType.POINTER_DOWN, stopAnimation));
+		// ResizeObserver catches layout/viewport changes; MutationObserver catches
+		// tabs being added or removed, which changes scrollWidth but not the box.
+		const resizeObserver = new ResizeObserver(onLayoutChange);
+		resizeObserver.observe(strip);
+		store.add(toDisposable(() => resizeObserver.disconnect()));
+		const mutationObserver = new MutationObserver(onLayoutChange);
+		mutationObserver.observe(strip, { childList: true, subtree: true, characterData: true });
+		store.add(toDisposable(() => mutationObserver.disconnect()));
+		store.add(toDisposable(stopAnimation));
+		refreshDirection();
+		update();
 		return store;
 	}
 

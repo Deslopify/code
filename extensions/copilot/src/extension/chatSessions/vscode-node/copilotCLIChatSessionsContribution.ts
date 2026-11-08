@@ -24,7 +24,7 @@ import { IPromptsService, ParsedPromptFile } from '../../../platform/promptFiles
 import { ITelemetryService } from '../../../platform/telemetry/common/telemetry';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { isUri } from '../../../util/common/types';
-import { DeferredPromise, disposableTimeout, IntervalTimer, raceCancellation, SequencerByKey } from '../../../util/vs/base/common/async';
+import { DeferredPromise, disposableTimeout, IntervalTimer, Limiter, raceCancellation, SequencerByKey } from '../../../util/vs/base/common/async';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { isCancellationError } from '../../../util/vs/base/common/errors';
 import { Emitter, Event } from '../../../util/vs/base/common/event';
@@ -45,16 +45,17 @@ import { FolderRepositoryInfo, FolderRepositoryMRUEntry, IChatFolderMruService, 
 import { isUntitledSessionId } from '../common/utils';
 import { emptyWorkspaceInfo, getWorkingDirectory, isIsolationEnabled, IWorkspaceInfo } from '../common/workspaceInfo';
 import { ICustomSessionTitleService } from '../copilotcli/common/customSessionTitleService';
-import { IChatDelegationSummaryService } from '../copilotcli/common/delegationSummaryService';
+import { IChatDelegationSummaryService } from '../common/delegationSummaryService';
 import { getCopilotCLISessionDir } from '../copilotcli/node/cliHelpers';
 import { COPILOT_CLI_CONTEXT_SIZE_PROPERTY, COPILOT_CLI_REASONING_EFFORT_PROPERTY, ICopilotCLIAgents, ICopilotCLIModels, ICopilotCLISDK, isWelcomeView, resolveContextTier } from '../copilotcli/node/copilotCli';
 import { CopilotCLIPromptResolver } from '../copilotcli/node/copilotcliPromptResolver';
 import { builtinSlashSCommands, CopilotCLICommand, copilotCLICommands, CopilotCLIQuotaExceededError, ICopilotCLISession } from '../copilotcli/node/copilotcliSession';
-import { ICopilotCLISessionItem, ICopilotCLISessionService } from '../copilotcli/node/copilotcliSessionService';
+import { CHAT_SESSION_ITEM_MAX_PARALLELISM, ICopilotCLISessionItem, ICopilotCLISessionService } from '../copilotcli/node/copilotcliSessionService';
 import { buildMcpServerMappings } from '../copilotcli/node/mcpHandler';
 import { ICopilotCLISessionTracker } from '../copilotcli/vscode-node/copilotCLISessionTracker';
 import { ICopilotCLIChatSessionItemProvider } from './copilotCLIChatSessions';
 import { getCopilotCLIModelDetails, persistCopilotCLIResponseModelId } from './copilotCLIModelDetails';
+import { ICopilotCLITerminalIntegration } from './copilotCLITerminalIntegration';
 import { CopilotCloudSessionsProvider } from './copilotCloudSessionsProvider';
 import { IPullRequestCreationService } from './pullRequestCreationService';
 import { getBlockingSiblingSessionsForFolder } from './worktreeSharing';
@@ -129,35 +130,6 @@ function getSessionLoadFailureIssueInfo(invalidSessionMessage: string): { readon
 	return { issueBody, issueUrl };
 }
 
-/**
- * Resolves candidate session directories for a CLI terminal, ordered by
- * terminal affinity.
- *
- * Sessions whose owning terminal matches `terminal` are returned first so the
- * link provider's file-existence probing hits the correct session-state dir
- * before unrelated ones. Unrelated sessions are still included at the tail
- * because a new session may not have registered its terminal yet (session IDs
- * arrive later via MCP?).
- */
-export async function resolveSessionDirsForTerminal(
-	sessionTracker: ICopilotCLISessionTracker,
-	terminal: vscode.Terminal,
-): Promise<Uri[]> {
-	const activeIds = sessionTracker.getSessionIds();
-	const matching: Uri[] = [];
-	const rest: Uri[] = [];
-	for (const id of activeIds) {
-		const sessionTerminal = await sessionTracker.getTerminal(id);
-		const dir = Uri.file(getCopilotCLISessionDir(id));
-		if (sessionTerminal === terminal) {
-			matching.push(dir);
-		} else {
-			rest.push(dir);
-		}
-	}
-	return [...matching, ...rest];
-}
-
 export class CopilotCLIChatSessionItemProvider extends Disposable implements vscode.ChatSessionItemProvider, ICopilotCLIChatSessionItemProvider {
 	// When we start an untitled CLI session, the id of the session is `untitled:xyz`
 	// As soon as we create a CLI session we have the real session id, lets say `cli-1234`
@@ -190,17 +162,18 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 	constructor(
 		@ICopilotCLISessionService private readonly copilotcliSessionService: ICopilotCLISessionService,
 		@ICopilotCLISessionTracker private readonly sessionTracker: ICopilotCLISessionTracker,
+		@ICopilotCLITerminalIntegration private readonly terminalIntegration: ICopilotCLITerminalIntegration,
 		@IChatSessionMetadataStore private readonly chatSessionMetadataStore: IChatSessionMetadataStore,
 		@IChatSessionWorktreeService private readonly worktreeManager: IChatSessionWorktreeService,
 		@IRunCommandExecutionService private readonly commandExecutionService: IRunCommandExecutionService,
 		@IChatSessionWorkspaceFolderService private readonly workspaceFolderService: IChatSessionWorkspaceFolderService,
+		@IFolderRepositoryManager private readonly folderRepositoryManager: IFolderRepositoryManager,
 		@IGitService private readonly gitService: IGitService,
 		@IOctoKitService private readonly octoKitService: IOctoKitService,
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
-
 		if (configurationService.getConfig(ConfigKey.Advanced.CLIChatLazyLoadSessionItem)) {
 			this.resolveChatSessionItem = async (item: vscode.ChatSessionItem, token: vscode.CancellationToken): Promise<vscode.ChatSessionItem | undefined> => {
 				const sessionId = SessionIdForCLI.parse(item.resource);
@@ -263,11 +236,12 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 		// eagerly so the visible row reflects the latest diff info on this re-provide pass.
 		const pendingIds = new Set(this.pendingChangeIncludeIds);
 		this.pendingChangeIncludeIds.clear();
-		const diskSessions = await Promise.all(sessions.map(async session => this.toChatSessionItem(
+		const limiter = new Limiter<vscode.ChatSessionItem>(CHAT_SESSION_ITEM_MAX_PARALLELISM);
+		const diskSessions = await Promise.all(sessions.map(session => limiter.queue(() => this.toChatSessionItem(
 			session,
 			pendingIds.has(session.id) ? { includeChanges: true } : undefined,
 			token,
-		)));
+		))));
 
 		const count = diskSessions.length;
 		void this.commandExecutionService.executeCommand('setContext', 'github.copilot.chat.cliSessionsEmpty', count === 0);
@@ -513,13 +487,27 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 			this.logService.trace(`[CopilotCLIChatSessionItemProvider] Failed to detect pull request on session open for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
-
 	public async resumeCopilotCLISessionInTerminal(sessionItem: vscode.ChatSessionItem): Promise<void> {
 		const id = SessionIdForCLI.parse(sessionItem.resource);
 		const existingTerminal = await this.sessionTracker.getTerminal(id);
 		if (existingTerminal) {
 			existingTerminal.show();
 			return;
+		}
+
+		const terminalName = sessionItem.label || id;
+		const cliArgs = ['--resume', id];
+		const token = new vscode.CancellationTokenSource();
+		try {
+			const folderInfo = await this.folderRepositoryManager.getFolderRepository(id, undefined, token.token);
+			const cwd = folderInfo.worktree ?? folderInfo.repository ?? folderInfo.folder;
+			const terminal = await this.terminalIntegration.openTerminal(terminalName, cliArgs, cwd?.fsPath);
+			if (terminal) {
+				this.sessionTracker.setSessionTerminal(id, terminal);
+				this.terminalIntegration.setTerminalSessionDir(terminal, Uri.file(getCopilotCLISessionDir(id)));
+			}
+		} finally {
+			token.dispose();
 		}
 	}
 }

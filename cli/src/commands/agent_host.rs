@@ -23,7 +23,6 @@ use crate::tunnels::agent_host::{
 };
 use crate::tunnels::agent_host_registry::{self, AgentHostEndpointIdentity, AgentHostServerType};
 use crate::tunnels::code_server::{resolve_local_server, CodeServerArgs};
-use crate::tunnels::dev_tunnels::DevTunnels;
 use crate::tunnels::idle_timeout::{self, TokioIdleSleeper};
 use crate::tunnels::legal;
 use crate::tunnels::shutdown_signal::ShutdownRequest;
